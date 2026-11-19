@@ -88,3 +88,17 @@ func TestPingLocalhost(t *testing.T) {
 		t.Fatalf("PingHost(127.0.0.1) = %#v", res)
 	}
 }
+
+func TestParseNMCLIWiFiOutput(t *testing.T) {
+	sample := "Office-WiFi:3C:93:F4:E6:76:8B:6:2437 MHz:88\n:AA:BB:CC:DD:EE:FF:36:5180 MHz:72\n"
+	networks := parseNMCLIWiFiOutput(sample, func(net.HardwareAddr) string { return "Huawei" })
+	if len(networks) != 2 {
+		t.Fatalf("len(networks) = %d, want 2", len(networks))
+	}
+	if networks[0].SSID != "Office-WiFi" || networks[0].Channel != 6 || networks[0].Band != "2.4 GHz" || networks[0].SignalQuality != 88 {
+		t.Fatalf("unexpected network[0]: %#v", networks[0])
+	}
+	if networks[1].SSID != "(Hidden Network)" || networks[1].Channel != 36 || networks[1].Band != "5 GHz" {
+		t.Fatalf("unexpected network[1]: %#v", networks[1])
+	}
+}

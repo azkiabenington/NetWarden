@@ -19,17 +19,16 @@ func configureCapture(ctx context.Context, dependencies *coreapp.Dependencies) e
 	if err != nil {
 		return fmt.Errorf("locate NetWarden executable: %w", err)
 	}
-	if os.Geteuid() == 0 {
-		dependencies.Open = func(interfaceName string) (capture.Driver, error) {
-			return helperclient.Open(ctx, executable, "capture-helper", "--interface", interfaceName)
-		}
-		return nil
-	}
-	pkexec, err := exec.LookPath("pkexec")
-	if err != nil {
-		return errors.New("PolicyKit pkexec is required to request packet-capture privileges")
-	}
+	isRoot := os.Geteuid() == 0
+	pkexec, pkexecErr := exec.LookPath("pkexec")
 	dependencies.Open = func(interfaceName string) (capture.Driver, error) {
+		driver, directErr := helperclient.Open(ctx, executable, "capture-helper", "--interface", interfaceName)
+		if directErr == nil || isRoot {
+			return driver, directErr
+		}
+		if pkexecErr != nil {
+			return nil, errors.New("PolicyKit pkexec or setcap cap_net_raw,cap_net_admin=eip is required to request packet-capture privileges")
+		}
 		return helperclient.Open(ctx, pkexec, executable, "capture-helper", "--interface", interfaceName)
 	}
 	return nil

@@ -733,11 +733,11 @@ func FrequencyToChannel(freqMHz int) (int, string) {
 	case freqMHz == 2484:
 		return 14, "2.4 GHz"
 	case freqMHz >= 2412 && freqMHz <= 2472:
-		return (freqMHz-2407)/5, "2.4 GHz"
+		return (freqMHz - 2407) / 5, "2.4 GHz"
 	case freqMHz >= 5170 && freqMHz <= 5885:
-		return (freqMHz-5000)/5, "5 GHz"
+		return (freqMHz - 5000) / 5, "5 GHz"
 	case freqMHz >= 5955 && freqMHz <= 7115:
-		return (freqMHz-5950)/5, "6 GHz"
+		return (freqMHz - 5950) / 5, "6 GHz"
 	default:
 		return 0, "Unknown"
 	}
@@ -760,6 +760,100 @@ func EvaluateCollisionRisk(band string, sameChannelCount int, rssiDBm int) strin
 		return "Medium"
 	}
 	return "Low"
+}
+
+var freqDigitsPattern = regexp.MustCompile(`(\d{4})`)
+
+func parseNMCLIWiFiOutput(raw string, vendorLookup func(net.HardwareAddr) string) []WiFiNetwork {
+	var networks []WiFiNetwork
+	channelCounts := make(map[int]int)
+
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format with -e no: SSID:AA:BB:CC:DD:EE:FF:CHAN:FREQ:SIGNAL
+		parts := strings.Split(line, ":")
+		if len(parts) < 9 {
+			continue
+		}
+		signalStr := strings.TrimSpace(parts[len(parts)-1])
+		freqStr := strings.TrimSpace(parts[len(parts)-2])
+		chanStr := strings.TrimSpace(parts[len(parts)-3])
+		bssidParts := parts[len(parts)-9 : len(parts)-3]
+		ssid := strings.TrimSpace(strings.Join(parts[:len(parts)-9], ":"))
+		if ssid == "" {
+			ssid = "(Hidden Network)"
+		}
+
+		bssidRaw := strings.ToLower(strings.Join(bssidParts, ":"))
+		mac, err := net.ParseMAC(bssidRaw)
+		if err != nil {
+			continue
+		}
+		vendor := ""
+		if vendorLookup != nil {
+			vendor = vendorLookup(mac)
+		}
+
+		channel, _ := strconv.Atoi(chanStr)
+		freqMHz := 0
+		if m := freqDigitsPattern.FindStringSubmatch(freqStr); len(m) > 1 {
+			freqMHz, _ = strconv.Atoi(m[1])
+		}
+		computedChan, band := FrequencyToChannel(freqMHz)
+		if channel == 0 {
+			channel = computedChan
+		}
+		if band == "Unknown" {
+			if channel >= 1 && channel <= 14 {
+				band = "2.4 GHz"
+				if freqMHz == 0 {
+					if channel == 14 {
+						freqMHz = 2484
+					} else {
+						freqMHz = 2407 + channel*5
+					}
+				}
+			} else if channel >= 32 {
+				band = "5 GHz"
+				if freqMHz == 0 {
+					freqMHz = 5000 + channel*5
+				}
+			}
+		}
+
+		quality, _ := strconv.Atoi(signalStr)
+		quality = max(0, min(100, quality))
+		rssi := (quality / 2) - 100
+
+		channelCounts[channel]++
+		networks = append(networks, WiFiNetwork{
+			SSID:          ssid,
+			BSSID:         mac.String(),
+			Vendor:        vendor,
+			RSSIDBm:       rssi,
+			SignalQuality: quality,
+			Channel:       channel,
+			FrequencyMHz:  freqMHz,
+			Band:          band,
+		})
+	}
+
+	for i := range networks {
+		same := channelCounts[networks[i].Channel]
+		networks[i].SameChannelAP = same
+		networks[i].CollisionRisk = EvaluateCollisionRisk(networks[i].Band, same, networks[i].RSSIDBm)
+	}
+
+	sort.Slice(networks, func(i, j int) bool {
+		if networks[i].RSSIDBm != networks[j].RSSIDBm {
+			return networks[i].RSSIDBm > networks[j].RSSIDBm
+		}
+		return networks[i].SSID < networks[j].SSID
+	})
+	return networks
 }
 
 func finalizePingStats(result *PingResult, rtts []float64) {

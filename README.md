@@ -101,17 +101,90 @@ flowchart TB
 
 ---
 
-## Quick Start
+## Quick Start & Installation
 
-### 1. Run Prebuilt Release (Windows)
+### 1. Installation on Windows (Windows 10 / 11 x64)
 
-1. Download the latest `NetWarden-Windows-x64.zip` (or `NetWarden.exe`) from [**GitHub Releases**](https://github.com/azkiabenington/NetWarden/releases).
-2. Ensure [Npcap](https://npcap.com/) is installed.
-3. Run `NetWarden.exe`, select your active network adapter (e.g. `Wi-Fi` or `Ethernet`), and click **Start monitoring**.
+#### Option A — Prebuilt Portable Executable (Recommended)
+1. **Install Npcap**: Download and install [**Npcap**](https://npcap.com/#download) with default settings (leave *"Restrict Npcap driver's access to Administrators only"* unchecked so NetWarden can capture packets without repeated UAC prompts), or install via Winget in PowerShell:
+   ```powershell
+   winget install Insecure.Npcap
+   ```
+2. **Download NetWarden**: Download [`NetWarden.exe`](https://github.com/azkiabenington/NetWarden/releases/latest/download/NetWarden.exe) or [`NetWarden-2.4.0-windows-amd64.zip`](https://github.com/azkiabenington/NetWarden/releases/download/v2.4.0/NetWarden-2.4.0-windows-amd64.zip) from [**GitHub Releases**](https://github.com/azkiabenington/NetWarden/releases):
+   ```powershell
+   Invoke-WebRequest -Uri "https://github.com/azkiabenington/NetWarden/releases/latest/download/NetWarden.exe" -OutFile "NetWarden.exe"
+   .\NetWarden.exe
+   ```
+3. **Start Monitoring**: Select your active network adapter (e.g. `Wi-Fi` or `Ethernet`) and click **Start monitoring**.
 
-### 2. Build from Source
+---
+
+### 2. Installation on Ubuntu (Ubuntu 22.04 / 24.04 LTS x64)
+
+#### Option A — Native Ubuntu `.deb` Installer (Recommended)
+The `.deb` package automatically installs required runtime dependencies (`GTK 3`, `WebKit2GTK 4.1`, `libpcap`), registers a desktop launcher icon in the Ubuntu Applications menu, and configures `cap_net_raw,cap_net_admin=eip` capabilities on `/usr/bin/netwarden`:
 
 ```bash
+# 1. Download the Ubuntu .deb package from GitHub Releases
+curl -LO https://github.com/azkiabenington/NetWarden/releases/download/v2.4.0/netwarden_2.4.0_amd64.deb
+
+# 2. Install the package and its dependencies via apt
+sudo apt update
+sudo apt install -y ./netwarden_2.4.0_amd64.deb
+
+# 3. Launch NetWarden from the Ubuntu App Launcher or terminal
+netwarden
+```
+
+#### Option B — Portable Linux `.tar.gz` Archive
+If you prefer a standalone binary without installing a system package:
+
+```bash
+# 1. Install runtime libraries on Ubuntu 22.04 / 24.04 LTS
+sudo apt update
+sudo apt install -y libgtk-3-0 libwebkit2gtk-4.1-0 libpcap0.8 policykit-1 libcap2-bin network-manager libnotify-bin
+
+# 2. Download and extract the Linux x64 archive
+curl -LO https://github.com/azkiabenington/NetWarden/releases/download/v2.4.0/NetWarden-2.4.0-linux-amd64.tar.gz
+tar -xzf NetWarden-2.4.0-linux-amd64.tar.gz
+
+# 3. (Recommended) Grant packet-capture capabilities so NetWarden runs without pkexec prompts
+sudo setcap cap_net_raw,cap_net_admin=eip ./NetWarden
+
+# 4. Run NetWarden
+./NetWarden
+```
+
+---
+
+### 3. Build from Source
+
+#### Build on Ubuntu (22.04 / 24.04 LTS)
+```bash
+# 1. Install build dependencies (Go 1.25+, Node.js 20+, GTK3, WebKit2GTK 4.1, libpcap)
+sudo apt update
+sudo apt install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libpcap-dev
+
+# 2. Clone the repository
+git clone https://github.com/azkiabenington/NetWarden.git
+cd NetWarden
+
+# 3. Build the frontend
+cd cmd/netwarden-gui/frontend
+npm ci
+npm test -- --run
+npm run build
+cd ../../..
+
+# 4. Run Go tests and build the Ubuntu desktop binary (with webkit2_41 tag)
+go test ./...
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+cd cmd/netwarden-gui
+$(go env GOPATH)/bin/wails build -clean -trimpath -s -tags webkit2_41
+```
+
+#### Build on Windows (10 / 11 x64)
+```powershell
 # 1. Clone the repository
 git clone https://github.com/azkiabenington/NetWarden.git
 cd NetWarden
@@ -123,16 +196,14 @@ npm test -- --run
 npm run build
 cd ../../..
 
-# 3. Run backend verification
+# 3. Run backend verification & build with Wails (requires MinGW-w64 gcc & Npcap SDK)
 go vet ./...
 go test ./...
-
-# 4. Build the native desktop executable with Wails
 cd cmd/netwarden-gui
 wails build -clean -trimpath -s -webview2 download
 ```
 
-The compiled binary will be generated at `cmd/netwarden-gui/build/bin/NetWarden.exe` (Windows) or `cmd/netwarden-gui/build/bin/NetWarden` (macOS/Linux).
+The compiled binary is generated at `cmd/netwarden-gui/build/bin/NetWarden` (Ubuntu/Linux) or `cmd/netwarden-gui/build/bin/NetWarden.exe` (Windows).
 
 ---
 
@@ -207,7 +278,13 @@ On Windows systems with Hyper-V, WSL2, or Docker virtual switches, unbound multi
 
 ## Production Deployment & Downloads
 
-Prebuilt binaries are published on [**GitHub Releases**](https://github.com/azkiabenington/NetWarden/releases):
+Prebuilt packages for **Windows**, **Ubuntu / Linux**, and **macOS** are published on [**GitHub Releases**](https://github.com/azkiabenington/NetWarden/releases):
 
-- **`NetWarden.exe`**: Standalone Windows x64 portable executable (also committed in the repository root for convenience).
-- **`NetWarden-Windows-x64.zip`**: Packaged Windows x64 release archive.
+| Asset | Platform | Description |
+| :--- | :--- | :--- |
+| **`NetWarden.exe`** | Windows 10/11 (x64) | Standalone portable Windows executable (also in repository root) |
+| **`NetWarden-2.4.0-windows-amd64.zip`** | Windows 10/11 (x64) | Packaged Windows x64 release archive |
+| **`netwarden_2.4.0_amd64.deb`** | Ubuntu 22.04 / 24.04+ (x64) | Native Debian/Ubuntu `.deb` installer with desktop launcher & `setcap` |
+| **`NetWarden-2.4.0-linux-amd64.tar.gz`** | Ubuntu / Linux (x64) | Portable Linux x64 binary archive (`GTK3` + `WebKit2GTK 4.1` + `libpcap`) |
+| **`NetWarden-2.4.0-macos-arm64.zip`** | macOS 13+ (Apple Silicon) | Native macOS `.app` bundle for M1/M2/M3/M4 Macs |
+| **`NetWarden-2.4.0-macos-amd64.zip`** | macOS 13+ (Intel) | Native macOS `.app` bundle for Intel Macs |

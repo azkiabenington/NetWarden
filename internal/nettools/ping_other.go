@@ -9,8 +9,18 @@ import (
 	"math"
 	"net"
 	"net/netip"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
+)
+
+var (
+	pingTimePattern = regexp.MustCompile(`(?i)time[=<]([\d.]+)\s*ms`)
+	pingTTLPattern  = regexp.MustCompile(`(?i)ttl=(\d+)`)
+	hopFromPattern  = regexp.MustCompile(`(?i)from\s+(\d{1,3}(?:\.\d{1,3}){3})`)
 )
 
 func PingHost(ctx context.Context, target string, count int) (PingResult, error) {
@@ -39,12 +49,19 @@ func PingHost(ctx context.Context, target string, count int) (PingResult, error)
 		if err := ctx.Err(); err != nil {
 			break
 		}
-		rtt, probeErr := tcpLatencyProbe(ctx, addr, 1000*time.Millisecond)
+		rtt, ttl, probeErr := unixPingOnce(ctx, addr, 64, 1200*time.Millisecond)
+		if probeErr != nil {
+			if tcpRTT, tcpErr := tcpLatencyProbe(ctx, addr, 900*time.Millisecond); tcpErr == nil {
+				rtt = tcpRTT
+				ttl = 64
+				probeErr = nil
+			}
+		}
 		sample := PingSample{Seq: seq}
 		if probeErr == nil {
 			sample.Success = true
 			sample.RTTMS = math.Round(rtt*100) / 100
-			sample.TTL = 64
+			sample.TTL = ttl
 			result.Received++
 			rtts = append(rtts, sample.RTTMS)
 		} else {
@@ -62,30 +79,110 @@ func PingHost(ctx context.Context, target string, count int) (PingResult, error)
 	return result, nil
 }
 
-func TraceRoute(ctx context.Context, target string, _ int) (TraceRouteResult, error) {
+func TraceRoute(ctx context.Context, target string, maxHops int) (TraceRouteResult, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return TraceRouteResult{}, errors.New("target host or IP address is required")
+	}
+	if maxHops <= 0 {
+		maxHops = 20
+	}
+	if maxHops > 30 {
+		maxHops = 30
 	}
 	addr, err := resolveTargetIPv4(ctx, target)
 	if err != nil {
 		return TraceRouteResult{}, err
 	}
-	rtt, probeErr := tcpLatencyProbe(ctx, addr, 1200*time.Millisecond)
-	hop := TraceHop{
-		Hop:      1,
-		IP:       addr.String(),
-		Hostname: quickReverseLookup(ctx, addr.String(), 300*time.Millisecond),
-		RTTMS:    math.Round(rtt*100) / 100,
-		Reached:  probeErr == nil,
-		Timeout:  probeErr != nil,
-	}
-	return TraceRouteResult{
+	result := TraceRouteResult{
 		Target:     target,
 		ResolvedIP: addr.String(),
-		Reached:    hop.Reached,
-		Hops:       []TraceHop{hop},
-	}, nil
+		Hops:       make([]TraceHop, 0, maxHops),
+	}
+
+	pingPath, lookErr := exec.LookPath("ping")
+	if lookErr != nil {
+		rtt, probeErr := tcpLatencyProbe(ctx, addr, 1200*time.Millisecond)
+		hop := TraceHop{
+			Hop:      1,
+			IP:       addr.String(),
+			Hostname: quickReverseLookup(ctx, addr.String(), 300*time.Millisecond),
+			RTTMS:    math.Round(rtt*100) / 100,
+			Reached:  probeErr == nil,
+			Timeout:  probeErr != nil,
+		}
+		result.Reached = hop.Reached
+		result.Hops = append(result.Hops, hop)
+		return result, nil
+	}
+
+	ttlFlag := "-t"
+	if runtime.GOOS == "darwin" {
+		ttlFlag = "-m"
+	}
+
+	for ttl := 1; ttl <= maxHops; ttl++ {
+		if ctx.Err() != nil {
+			break
+		}
+		hopCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+		start := time.Now()
+		out, cmdErr := exec.CommandContext(hopCtx, pingPath, "-n", "-c", "1", "-W", "1", ttlFlag, strconv.Itoa(ttl), addr.String()).CombinedOutput()
+		elapsedMS := math.Round(float64(time.Since(start).Microseconds())/10.0) / 100.0
+		cancel()
+
+		text := string(out)
+		hop := TraceHop{Hop: ttl}
+		if match := hopFromPattern.FindStringSubmatch(text); len(match) > 1 {
+			hop.IP = match[1]
+			hop.RTTMS = elapsedMS
+			if tm := pingTimePattern.FindStringSubmatch(text); len(tm) > 1 {
+				if parsed, parseErr := strconv.ParseFloat(tm[1], 64); parseErr == nil {
+					hop.RTTMS = math.Round(parsed*100) / 100
+				}
+			}
+			hop.Hostname = quickReverseLookup(ctx, hop.IP, 220*time.Millisecond)
+			if hop.IP == addr.String() && cmdErr == nil {
+				hop.Reached = true
+			}
+		} else {
+			hop.Timeout = true
+		}
+		result.Hops = append(result.Hops, hop)
+		if hop.Reached {
+			result.Reached = true
+			break
+		}
+	}
+	return result, nil
+}
+
+func unixPingOnce(ctx context.Context, addr netip.Addr, ttl int, timeout time.Duration) (float64, int, error) {
+	pingPath, err := exec.LookPath("ping")
+	if err != nil {
+		return 0, 0, err
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout+300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	out, err := exec.CommandContext(cmdCtx, pingPath, "-n", "-c", "1", "-W", "1", addr.String()).CombinedOutput()
+	elapsedMS := float64(time.Since(start).Microseconds()) / 1000.0
+	if err != nil {
+		return 0, 0, errors.New("request timed out")
+	}
+	text := string(out)
+	if tm := pingTimePattern.FindStringSubmatch(text); len(tm) > 1 {
+		if parsed, parseErr := strconv.ParseFloat(tm[1], 64); parseErr == nil {
+			elapsedMS = parsed
+		}
+	}
+	replyTTL := ttl
+	if ttlm := pingTTLPattern.FindStringSubmatch(text); len(ttlm) > 1 {
+		if parsedTTL, parseErr := strconv.Atoi(ttlm[1]); parseErr == nil {
+			replyTTL = parsedTTL
+		}
+	}
+	return elapsedMS, replyTTL, nil
 }
 
 func resolveTargetIPv4(ctx context.Context, target string) (netip.Addr, error) {

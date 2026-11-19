@@ -89,13 +89,68 @@ jobs:
       - name: Build Linux application
         working-directory: cmd/netwarden-gui
         run: wails build -clean -trimpath -s -tags webkit2_41 -ldflags "-X main.applicationVersion=${{ needs.validate.outputs.version }} -X main.buildVersion=${GITHUB_SHA}"
-      - name: Package Linux application
+      - name: Package Linux application (.tar.gz and Ubuntu .deb)
         shell: bash
-        run: tar -C cmd/netwarden-gui/build/bin -czf "NetWarden-${{ needs.validate.outputs.version }}-linux-amd64.tar.gz" NetWarden
+        run: |
+          VER="${{ needs.validate.outputs.version }}"
+          cp README.md LICENSE cmd/netwarden-gui/build/bin/
+          tar -C cmd/netwarden-gui/build/bin -czf "NetWarden-${VER}-linux-amd64.tar.gz" NetWarden README.md LICENSE
+
+          DEB_ROOT="pkg-deb/netwarden_${VER}_amd64"
+          mkdir -p "${DEB_ROOT}/DEBIAN" \
+                   "${DEB_ROOT}/usr/bin" \
+                   "${DEB_ROOT}/usr/share/applications" \
+                   "${DEB_ROOT}/usr/share/pixmaps"
+          cp cmd/netwarden-gui/build/bin/NetWarden "${DEB_ROOT}/usr/bin/netwarden"
+          chmod 0755 "${DEB_ROOT}/usr/bin/netwarden"
+          ln -sf /usr/bin/netwarden "${DEB_ROOT}/usr/bin/NetWarden"
+          cp cmd/netwarden-gui/build/appicon.png "${DEB_ROOT}/usr/share/pixmaps/netwarden.png"
+
+          cat > "${DEB_ROOT}/usr/share/applications/netwarden.desktop" << 'EOF'
+          [Desktop Entry]
+          Name=NetWarden
+          Comment=Local network discovery, gateway security, bandwidth shaping, and network tools
+          Exec=/usr/bin/netwarden
+          Icon=netwarden
+          Terminal=false
+          Type=Application
+          Categories=Network;Security;System;Monitor;
+          Keywords=network;scanner;arp;bandwidth;wifi;ping;security;
+          EOF
+
+          cat > "${DEB_ROOT}/DEBIAN/control" << EOF
+          Package: netwarden
+          Version: ${VER}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libc6, libgtk-3-0t64 | libgtk-3-0, libwebkit2gtk-4.1-0, libpcap0.8t64 | libpcap0.8, pkexec | policykit-1, libcap2-bin
+          Recommends: network-manager, libnotify-bin, xdg-utils
+          Maintainer: NetWarden Contributors <https://github.com/azkiabenington/NetWarden>
+          Homepage: https://github.com/azkiabenington/NetWarden
+          Description: Local network discovery, gateway security, bandwidth shaping, and network tools
+           NetWarden is a desktop application for local-network device discovery,
+           multi-protocol LAN identification, gateway-security monitoring, device
+           whitelisting, dual-stack bandwidth shaping, and network troubleshooting.
+          EOF
+
+          cat > "${DEB_ROOT}/DEBIAN/postinst" << 'EOF'
+          #!/bin/sh
+          set -e
+          if command -v setcap >/dev/null 2>&1; then
+            setcap cap_net_raw,cap_net_admin=eip /usr/bin/netwarden || true
+          fi
+          exit 0
+          EOF
+          chmod 0755 "${DEB_ROOT}/DEBIAN/postinst"
+
+          dpkg-deb --build --root-owner-group "${DEB_ROOT}" "netwarden_${VER}_amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-amd64
-          path: NetWarden-*.tar.gz
+          path: |
+            NetWarden-*.tar.gz
+            netwarden_*_amd64.deb
           if-no-files-found: error
 
   build-windows:
@@ -201,8 +256,8 @@ jobs:
           path: release-assets
       - name: Generate checksums
         working-directory: release-assets
-        run: sha256sum NetWarden-* > SHA256SUMS
-      - name: Create or update draft release
+        run: sha256sum NetWarden-* netwarden_* > SHA256SUMS
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
@@ -210,5 +265,5 @@ jobs:
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/* --clobber
           else
-            gh release create "$RELEASE_TAG" release-assets/* --draft --generate-notes --title "NetWarden $RELEASE_TAG"
+            gh release create "$RELEASE_TAG" release-assets/* --generate-notes --title "NetWarden $RELEASE_TAG"
           fi
