@@ -228,6 +228,8 @@ func Bootstrap(ctx context.Context, dependencies Dependencies, config Config) (*
 	if binder, ok := dependencies.Metadata.(metadataRefreshBinder); ok {
 		binder.SetRefresh(func(mac string) { service.RefreshMetadata(mac) })
 	}
+	service.RefreshMetadata(networkContext.Local.MAC.String())
+	service.RefreshMetadata(networkContext.Gateway.MAC.String())
 	prober := discovery.NewARPProber(driver, networkContext.Local.MAC, networkContext.Local.IP)
 	scanner := discovery.NewScanner(prober, config.MaximumHosts, config.ProbeDelay)
 	runtime := &Runtime{

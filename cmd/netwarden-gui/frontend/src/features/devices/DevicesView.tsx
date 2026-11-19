@@ -10,10 +10,12 @@ import { useRuntimeStatus } from "@/features/monitoring/monitoring.queries"
 import type { Device } from "@/lib/wails/types"
 import { BulkProgress } from "./DeviceBulkActions"
 import { DeviceDetails } from "./DeviceDetails"
-import { defaultDevicePreferences, type DevicePreferences, isControlEligible } from "./device-list"
+import { defaultDevicePreferences, type DevicePreferences, type DeviceSortKey, isControlEligible } from "./device-list"
 import { DeviceTable } from "./DeviceTable"
 import { DeviceToolbar } from "./DeviceToolbar"
 import { useDevices } from "./devices.queries"
+
+const textCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 
 export function DevicesView() {
   const { data: devices = [], isLoading, error, refetch } = useDevices()
@@ -126,6 +128,15 @@ export function DevicesView() {
               bandwidthByMAC={bandwidthByMAC}
               bandwidthBlockedMACs={bandwidthBlockedMACs}
               checkedMACs={checkedMACs}
+              sortBy={preferences.sortBy}
+              descending={preferences.descending}
+              onSortChange={(key: DeviceSortKey) =>
+                setPreferences((current) => ({
+                  ...current,
+                  sortBy: key,
+                  descending: current.sortBy === key ? !current.descending : false,
+                }))
+              }
               onCheckedChange={setChecked}
               onCheckVisible={setVisibleChecked}
               onOpen={(device, trigger) => {
@@ -166,23 +177,30 @@ export function DevicesView() {
 function filterAndSortDevices(devices: Device[], preferences: DevicePreferences) {
   return devices
     .filter((device) =>
-      `${device.name} ${device.ip} ${device.mac} ${device.vendor} ${device.type}`
+      `${device.name} ${device.ip} ${(device.addresses || []).join(" ")} ${device.mac} ${device.vendor} ${device.type}`
         .toLowerCase()
         .includes(preferences.query.toLowerCase()),
     )
     .filter((device) => preferences.presence === "all" || (preferences.presence === "online") === device.online)
     .filter((device) => preferences.role === "all" || device.role === preferences.role)
     .sort((left, right) => {
-      const leftValue = preferences.sortBy === "lastSeen" ? new Date(left.lastSeen).getTime() : left[preferences.sortBy]
+      const leftValue =
+        preferences.sortBy === "firstSeen" || preferences.sortBy === "lastSeen"
+          ? new Date(left[preferences.sortBy]).getTime()
+          : left[preferences.sortBy]
       const rightValue =
-        preferences.sortBy === "lastSeen" ? new Date(right.lastSeen).getTime() : right[preferences.sortBy]
-      const result =
+        preferences.sortBy === "firstSeen" || preferences.sortBy === "lastSeen"
+          ? new Date(right[preferences.sortBy]).getTime()
+          : right[preferences.sortBy]
+      let result =
         typeof leftValue === "number" || typeof leftValue === "boolean"
           ? Number(leftValue) - Number(rightValue)
-          : String(leftValue).localeCompare(String(rightValue), undefined, {
-              numeric: preferences.sortBy === "ip",
-              sensitivity: "base",
-            })
+          : textCollator.compare(String(leftValue), String(rightValue))
+      if (result === 0) {
+        result =
+          new Date(left.firstSeen).getTime() - new Date(right.firstSeen).getTime() ||
+          textCollator.compare(left.mac, right.mac)
+      }
       return preferences.descending ? -result : result
     })
 }

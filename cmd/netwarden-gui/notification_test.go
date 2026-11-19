@@ -50,3 +50,20 @@ func TestNotificationContentUsesResolvedDeviceName(t *testing.T) {
 		t.Fatalf("got %q", body)
 	}
 }
+
+func TestDeviceDTOUsesFallbackVendorNameWhenHostnameUnresolved(t *testing.T) {
+	gateway := deviceDTO(device.Device{
+		IP: netip.MustParseAddr("192.168.100.1"), MAC: "3c:93:f4:e6:76:8b",
+		Name: "192.168.100.1", Vendor: "HUAWEI TECHNOLOGIES CO.,LTD", Role: device.RoleGateway,
+	})
+	if gateway.Name != "Huawei Gateway" {
+		t.Fatalf("gateway.Name = %q, want Huawei Gateway", gateway.Name)
+	}
+	peer := deviceDTO(device.Device{
+		IP: netip.MustParseAddr("192.168.100.79"), MAC: "d8:d6:68:e1:9e:07",
+		Name: "192.168.100.79", Vendor: "Tuya Smart Inc.", Type: device.TypeSmartHome, Role: device.RolePeer,
+	})
+	if peer.Name != "Tuya · Smart home" {
+		t.Fatalf("peer.Name = %q, want Tuya · Smart home", peer.Name)
+	}
+}

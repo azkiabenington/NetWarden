@@ -15,25 +15,45 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 2_
 
 function RuntimeEventBridge() {
   const client = useQueryClient()
-  useEffect(
-    () =>
-      subscribeRuntimeEvents({
-        onChange: (event) => {
-          client.invalidateQueries({ queryKey: queryKeys.runtime })
-          if (event?.title)
-            announce(
-              [event.title, event.detail].filter(Boolean).join(". "),
-              event.severity === "error" ? "assertive" : "polite",
-            )
-        },
-        onError: (message) => {
-          toast.error("Runtime error", { description: message })
-          announce(`Runtime error. ${message}`, "assertive")
-          client.invalidateQueries({ queryKey: queryKeys.runtime })
-        },
-      }),
-    [client],
-  )
+  useEffect(() => {
+    let lastInvalidate = 0
+    let pendingTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleInvalidate = () => {
+      const now = Date.now()
+      const elapsed = now - lastInvalidate
+      if (elapsed >= 250) {
+        lastInvalidate = now
+        void client.invalidateQueries({ queryKey: queryKeys.runtime })
+        return
+      }
+      if (!pendingTimer) {
+        pendingTimer = setTimeout(() => {
+          pendingTimer = null
+          lastInvalidate = Date.now()
+          void client.invalidateQueries({ queryKey: queryKeys.runtime })
+        }, 250 - elapsed)
+      }
+    }
+    const unsubscribe = subscribeRuntimeEvents({
+      onChange: (event) => {
+        scheduleInvalidate()
+        if (event?.title)
+          announce(
+            [event.title, event.detail].filter(Boolean).join(". "),
+            event.severity === "error" ? "assertive" : "polite",
+          )
+      },
+      onError: (message) => {
+        toast.error("Runtime error", { description: message })
+        announce(`Runtime error. ${message}`, "assertive")
+        void client.invalidateQueries({ queryKey: queryKeys.runtime })
+      },
+    })
+    return () => {
+      if (pendingTimer) clearTimeout(pendingTimer)
+      unsubscribe()
+    }
+  }, [client])
   return null
 }
 

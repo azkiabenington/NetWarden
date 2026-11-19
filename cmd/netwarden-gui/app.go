@@ -443,10 +443,10 @@ func (a *GUIApp) Devices() ([]DeviceDTO, error) {
 		if result[i].Online != result[j].Online {
 			return result[i].Online
 		}
-		if result[i].Role != result[j].Role {
-			return result[i].Role < result[j].Role
+		if !result[i].FirstSeen.Equal(result[j].FirstSeen) {
+			return result[i].FirstSeen.Before(result[j].FirstSeen)
 		}
-		return result[i].IP < result[j].IP
+		return result[i].MAC < result[j].MAC
 	})
 	return result, nil
 }
@@ -1013,5 +1013,103 @@ func deviceDTO(value device.Device) DeviceDTO {
 	for _, address := range value.Addresses {
 		addresses = append(addresses, address.String())
 	}
-	return DeviceDTO{IP: value.IP.String(), Addresses: addresses, MAC: value.MAC, Name: value.Name, Vendor: value.Vendor, Type: string(deviceType), Role: roles[value.Role], FirstSeen: value.FirstSeen, LastSeen: value.LastSeen, Online: value.Online}
+	name := strings.TrimSpace(value.Name)
+	if name == "" || name == value.IP.String() {
+		name = fallbackDeviceName(value, deviceType)
+	}
+	return DeviceDTO{IP: value.IP.String(), Addresses: addresses, MAC: value.MAC, Name: name, Vendor: value.Vendor, Type: string(deviceType), Role: roles[value.Role], FirstSeen: value.FirstSeen, LastSeen: value.LastSeen, Online: value.Online}
+}
+
+func fallbackDeviceName(value device.Device, deviceType device.Type) string {
+	vendor := shortVendorName(value.Vendor)
+	switch value.Role {
+	case device.RoleLocal:
+		if vendor != "" {
+			return vendor + " device"
+		}
+		return "This device"
+	case device.RoleGateway:
+		if vendor != "" {
+			return vendor + " Gateway"
+		}
+		return "Gateway"
+	default:
+		if vendor != "" {
+			if deviceType != "" && deviceType != device.TypeUnknown {
+				return vendor + " · " + string(deviceType)
+			}
+			return vendor + " device"
+		}
+		return value.IP.String()
+	}
+}
+
+func shortVendorName(vendor string) string {
+	v := strings.TrimSpace(vendor)
+	if v == "" || strings.EqualFold(v, "unknown") || strings.EqualFold(v, "private / randomized") {
+		return ""
+	}
+	lower := strings.ToLower(v)
+	known := []struct {
+		match string
+		label string
+	}{
+		{"huawei", "Huawei"},
+		{"tp-link", "TP-Link"},
+		{"tuya", "Tuya"},
+		{"apple", "Apple"},
+		{"samsung", "Samsung"},
+		{"xiaomi", "Xiaomi"},
+		{"intel", "Intel"},
+		{"realtek", "Realtek"},
+		{"espressif", "Espressif"},
+		{"ubiquiti", "Ubiquiti"},
+		{"mikrotik", "MikroTik"},
+		{"cisco", "Cisco"},
+		{"netgear", "Netgear"},
+		{"asus", "ASUS"},
+		{"asustek", "ASUS"},
+		{"acer", "Acer"},
+		{"lenovo", "Lenovo"},
+		{"dell", "Dell"},
+		{"hewlett packard", "HP"},
+		{"hp inc", "HP"},
+		{"sony", "Sony"},
+		{"nintendo", "Nintendo"},
+		{"microsoft", "Microsoft"},
+		{"google", "Google"},
+		{"amazon", "Amazon"},
+		{"sonos", "Sonos"},
+		{"roku", "Roku"},
+		{"gaoshengda", "Gaoshengda"},
+		{"altobeam", "AltoBeam"},
+		{"ai-link", "AI-Link"},
+		{"zte", "ZTE"},
+		{"fiberhome", "FiberHome"},
+		{"oppo", "OPPO"},
+		{"vivo", "vivo"},
+		{"oneplus", "OnePlus"},
+		{"murata", "Murata"},
+		{"mediatek", "MediaTek"},
+		{"qualcomm", "Qualcomm"},
+		{"broadcom", "Broadcom"},
+	}
+	for _, item := range known {
+		if strings.Contains(lower, item.match) {
+			return item.label
+		}
+	}
+	if idx := strings.IndexAny(v, ",("); idx > 0 {
+		v = strings.TrimSpace(v[:idx])
+	}
+	for _, noise := range []string{
+		" Technologies Co.", " Technology Co.", " Communications Co.",
+		" Electronics Co.", " Systems Inc.", " Corporate", " Corporation",
+		" Co.", " Inc.", " Inc", " Ltd.", " Ltd", " LLC", " GmbH",
+	} {
+		if len(v) > len(noise) && strings.EqualFold(v[len(v)-len(noise):], noise) {
+			v = strings.TrimSpace(v[:len(v)-len(noise)])
+		}
+	}
+	return v
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,15 +33,17 @@ var vendorIndex struct {
 }
 
 type Resolver struct {
-	mu        sync.RWMutex
-	nicknames map[string]string
-	vendors   map[string]string
-	hostnames map[netip.Addr]hostnameEntry
-	inflight  map[netip.Addr]map[string]struct{}
-	lookup    func(context.Context, string) ([]string, error)
-	refresh   func(string)
-	ttl       time.Duration
-	timeout   time.Duration
+	mu           sync.RWMutex
+	nicknames    map[string]string
+	vendors      map[string]string
+	hostnames    map[netip.Addr]hostnameEntry
+	macHostnames map[string]hostnameEntry
+	inflight     map[netip.Addr]map[string]struct{}
+	lookup       func(context.Context, string) ([]string, error)
+	refresh      func(string)
+	ttl          time.Duration
+	timeout      time.Duration
+	localName    string
 }
 
 type hostnameEntry struct {
@@ -70,10 +73,13 @@ func NewResolver(nicknames map[string]string) (*Resolver, error) {
 	for mac, nickname := range nicknames {
 		copyNicknames[strings.ToLower(mac)] = nickname
 	}
+	localHost, _ := os.Hostname()
 	return &Resolver{
 		nicknames: copyNicknames, vendors: vendorIndex.values,
-		hostnames: make(map[netip.Addr]hostnameEntry), inflight: make(map[netip.Addr]map[string]struct{}),
-		lookup: net.DefaultResolver.LookupAddr, ttl: 30 * time.Minute, timeout: 2 * time.Second,
+		hostnames: make(map[netip.Addr]hostnameEntry), macHostnames: make(map[string]hostnameEntry),
+		inflight: make(map[netip.Addr]map[string]struct{}),
+		lookup: lookupDeviceNames, ttl: 30 * time.Minute, timeout: 10 * time.Second,
+		localName: cleanResolvedHostname(localHost),
 	}, nil
 }
 
@@ -82,18 +88,38 @@ func (r *Resolver) Enrich(snapshot device.Device) device.Metadata {
 	result := device.Metadata{Name: snapshot.IP.String(), Vendor: "Unknown"}
 	mac := strings.ToLower(snapshot.MAC)
 	nickname := r.nicknames[mac]
+	now := time.Now()
 	if nickname != "" {
 		result.Name = nickname
-	} else if cached, ok := r.hostnames[snapshot.IP]; ok && time.Now().Before(cached.expires) && cached.name != "" {
+	} else if snapshot.Role == device.RoleLocal && r.localName != "" {
+		result.Name = r.localName
+	} else if cached, ok := r.hostnames[snapshot.IP]; ok && now.Before(cached.expires) && cached.name != "" {
 		result.Name = cached.name
+	} else {
+		for _, address := range snapshot.Addresses {
+			if cached, ok := r.hostnames[address]; ok && now.Before(cached.expires) && cached.name != "" {
+				result.Name = cached.name
+				break
+			}
+		}
+		if result.Name == snapshot.IP.String() {
+			if cached, ok := r.macHostnames[mac]; ok && now.Before(cached.expires) && cached.name != "" {
+				result.Name = cached.name
+			}
+		}
 	}
 	if normalizedMAC := normalizeHardwareAddress(mac); len(normalizedMAC) == 12 {
 		result.Vendor = resolveVendor(normalizedMAC, r.vendors)
 	}
 	result.Type = identifyType(result.Name, result.Vendor)
 	r.mu.RUnlock()
-	if nickname == "" {
+	if nickname == "" && snapshot.Role != device.RoleLocal {
 		r.resolveHostname(snapshot.IP, mac)
+		for _, address := range snapshot.Addresses {
+			if address.Is4() && address != snapshot.IP {
+				r.resolveHostname(address, mac)
+			}
+		}
 	}
 	return result
 }
@@ -178,7 +204,19 @@ func (r *Resolver) resolveHostname(ip netip.Addr, mac string) {
 		r.mu.Lock()
 		waiters := r.inflight[ip]
 		delete(r.inflight, ip)
-		r.hostnames[ip] = hostnameEntry{name: name, expires: time.Now().Add(ttl)}
+		cacheTTL := ttl
+		if name == "" && cacheTTL > 15*time.Second {
+			cacheTTL = 15 * time.Second
+		}
+		entry := hostnameEntry{name: name, expires: time.Now().Add(cacheTTL)}
+		r.hostnames[ip] = entry
+		if name != "" {
+			for waiter := range waiters {
+				if waiter != "" {
+					r.macHostnames[waiter] = entry
+				}
+			}
+		}
 		refresh := r.refresh
 		r.mu.Unlock()
 		if name != "" && refresh != nil {

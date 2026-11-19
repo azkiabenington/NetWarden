@@ -99,6 +99,7 @@ export function DeviceToolbar({
           value={preferences.sortBy}
           onChange={(event) => update("sortBy", event.target.value as DeviceSortKey)}
         >
+          <NativeSelectOption value="firstSeen">Sort by discovery order</NativeSelectOption>
           <NativeSelectOption value="name">Sort by name</NativeSelectOption>
           <NativeSelectOption value="ip">Sort by IP address</NativeSelectOption>
           <NativeSelectOption value="vendor">Sort by vendor</NativeSelectOption>

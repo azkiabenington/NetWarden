@@ -1,19 +1,33 @@
 import { useEffect, useRef } from "react"
-import { ChevronRight, LoaderCircle } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronRight, LoaderCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { announce } from "@/lib/accessibility"
 import { formatDate } from "@/lib/format"
 import type { Device } from "@/lib/wails/types"
 import type { BandwidthLimit } from "@/lib/wails/types"
 import { bandwidthSummary } from "@/features/bandwidth/format"
-import { isControlEligible } from "./device-list"
+import { type DeviceSortKey, isControlEligible } from "./device-list"
 import { useRateUnit } from "@/lib/measurement"
+
+const sortableColumns: Array<{ key: DeviceSortKey; label: string }> = [
+  { key: "name", label: "Device" },
+  { key: "ip", label: "Address" },
+  { key: "vendor", label: "Vendor" },
+  { key: "type", label: "Type" },
+  { key: "role", label: "Role" },
+  { key: "online", label: "Status" },
+  { key: "controlState", label: "Control" },
+]
 
 export function DeviceTable({
   devices,
   bandwidthByMAC,
   bandwidthBlockedMACs,
   checkedMACs,
+  sortBy,
+  descending,
+  onSortChange,
   onCheckedChange,
   onCheckVisible,
   onOpen,
@@ -22,6 +36,9 @@ export function DeviceTable({
   bandwidthByMAC: Map<string, BandwidthLimit>
   bandwidthBlockedMACs: Set<string>
   checkedMACs: Set<string>
+  sortBy: DeviceSortKey
+  descending: boolean
+  onSortChange: (key: DeviceSortKey) => void
   onCheckedChange: (mac: string, checked: boolean) => void
   onCheckVisible: (checked: boolean) => void
   onOpen: (device: Device, trigger: HTMLElement) => void
@@ -31,6 +48,11 @@ export function DeviceTable({
   )
   const allChecked = eligible.length > 0 && eligible.every((device) => checkedMACs.has(device.mac))
   const someChecked = eligible.some((device) => checkedMACs.has(device.mac))
+  const handleHeaderSort = (key: DeviceSortKey, label: string) => {
+    const nextDescending = sortBy === key ? !descending : false
+    onSortChange(key)
+    announce(`Sorted by ${label}, ${nextDescending ? "descending" : "ascending"}, ${devices.length} rows`, "polite")
+  }
   return (
     <div className="overflow-x-auto">
       <Table className="min-w-[1150px]">
@@ -45,15 +67,22 @@ export function DeviceTable({
                 onChange={onCheckVisible}
               />
             </TableHead>
-            <TableHead>Device</TableHead>
-            <TableHead>Address</TableHead>
-            <TableHead>Vendor</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Control</TableHead>
-            <TableHead>Bandwidth</TableHead>
-            <TableHead>Last seen</TableHead>
+            {sortableColumns.map(({ key, label }) => (
+              <SortableTableHead
+                key={key}
+                label={label}
+                active={sortBy === key}
+                descending={descending}
+                onSort={() => handleHeaderSort(key, label)}
+              />
+            ))}
+            <TableHead scope="col">Bandwidth</TableHead>
+            <SortableTableHead
+              label="Last seen"
+              active={sortBy === "lastSeen"}
+              descending={descending}
+              onSort={() => handleHeaderSort("lastSeen", "Last seen")}
+            />
             <TableHead />
           </TableRow>
         </TableHeader>
@@ -120,7 +149,15 @@ function DeviceRow({
         }
       }}
     >
-      <TableCell onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      <TableCell
+        onClick={(event) => {
+          event.stopPropagation()
+          if (isControlEligible(device) && !bandwidthBlocked) {
+            onCheckedChange(!checked)
+          }
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
         <SelectionCheckbox
           label={`Select ${device.name || device.ip}`}
           checked={checked}
@@ -139,7 +176,16 @@ function DeviceRow({
           </div>
         </div>
       </TableCell>
-      <TableCell>{device.ip}</TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1.5 font-mono text-xs">
+          <span>{device.ip}</span>
+          {device.addresses && device.addresses.length > 1 && (
+            <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
+              +{device.addresses.length - 1}
+            </Badge>
+          )}
+        </div>
+      </TableCell>
       <TableCell className="max-w-48 truncate text-muted-foreground" title={device.vendor}>
         {device.vendor || "Unknown"}
       </TableCell>
@@ -166,6 +212,36 @@ function DeviceRow({
         <ChevronRight className="size-4 text-muted-foreground" />
       </TableCell>
     </TableRow>
+  )
+}
+
+function SortableTableHead({
+  label,
+  active,
+  descending,
+  onSort,
+}: {
+  label: string
+  active: boolean
+  descending: boolean
+  onSort: () => void
+}) {
+  return (
+    <TableHead scope="col" aria-sort={active ? (descending ? "descending" : "ascending") : undefined} className="p-0">
+      <button
+        type="button"
+        onClick={onSort}
+        className="flex h-10 min-h-6 w-full items-center gap-1 px-2 text-left font-medium text-foreground hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        <span>{label}</span>
+        {active &&
+          (descending ? (
+            <ArrowDown aria-hidden="true" className="size-3.5 text-primary" />
+          ) : (
+            <ArrowUp aria-hidden="true" className="size-3.5 text-primary" />
+          ))}
+      </button>
+    </TableHead>
   )
 }
 

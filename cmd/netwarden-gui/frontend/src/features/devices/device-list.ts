@@ -1,6 +1,15 @@
 import type { Device } from "@/lib/wails/types"
 
-export type DeviceSortKey = "name" | "ip" | "vendor" | "type" | "role" | "lastSeen" | "online" | "controlState"
+export type DeviceSortKey =
+  | "firstSeen"
+  | "name"
+  | "ip"
+  | "vendor"
+  | "type"
+  | "role"
+  | "lastSeen"
+  | "online"
+  | "controlState"
 export type DevicePreferences = {
   query: string
   presence: string
@@ -13,7 +22,7 @@ export const defaultDevicePreferences: DevicePreferences = {
   query: "",
   presence: "online",
   role: "Device",
-  sortBy: "name",
+  sortBy: "firstSeen",
   descending: false,
 }
 

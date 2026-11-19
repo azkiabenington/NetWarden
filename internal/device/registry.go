@@ -92,13 +92,15 @@ type ObservationResult struct {
 
 type record struct {
 	Device
-	addressSeen map[netip.Addr]time.Time
+	addressSeen  map[netip.Addr]time.Time
+	lastIPv4Seen time.Time
 }
 
 type Registry struct {
-	mu      sync.RWMutex
-	devices map[string]*record
-	byIP    map[netip.Addr]string
+	mu            sync.RWMutex
+	devices       map[string]*record
+	byIP          map[netip.Addr]string
+	lastFirstSeen time.Time
 }
 
 func NewRegistry() *Registry {
@@ -150,9 +152,14 @@ func (r *Registry) ObserveDetailed(observation Observation) (ObservationResult, 
 	defer r.mu.Unlock()
 	existing, ok := r.devices[mac]
 	if !ok {
+		firstSeen := seenAt
+		if !firstSeen.After(r.lastFirstSeen) {
+			firstSeen = r.lastFirstSeen.Add(time.Nanosecond)
+		}
+		r.lastFirstSeen = firstSeen
 		snapshot := Device{
 			IP: observation.IP, Addresses: []netip.Addr{observation.IP}, MAC: mac, Name: observation.IP.String(),
-			FirstSeen: seenAt, LastSeen: seenAt, Online: true,
+			FirstSeen: firstSeen, LastSeen: seenAt, Online: true,
 		}
 		result := ObservationResult{Device: snapshot}
 		if previousMAC, occupied := r.byIP[observation.IP]; occupied && previousMAC != mac {
@@ -164,7 +171,11 @@ func (r *Registry) ObserveDetailed(observation Observation) (ObservationResult, 
 				})
 			}
 		}
-		r.devices[mac] = &record{Device: snapshot, addressSeen: map[netip.Addr]time.Time{observation.IP: seenAt}}
+		rec := &record{Device: snapshot, addressSeen: map[netip.Addr]time.Time{observation.IP: seenAt}}
+		if observation.IP.Is4() && !observation.SeenAt.IsZero() {
+			rec.lastIPv4Seen = seenAt
+		}
+		r.devices[mac] = rec
 		r.byIP[observation.IP] = mac
 		result.Changes = append(result.Changes, Change{Kind: ChangeDiscovered, Device: snapshot})
 		return cloneObservationResult(result), nil
@@ -184,9 +195,13 @@ func (r *Registry) ObserveDetailed(observation Observation) (ObservationResult, 
 	}
 	addressAdded := !containsAddress(existing.Addresses, observation.IP)
 	if addressAdded {
-		// IPv4 leases are treated as replacements. IPv6 devices legitimately use
-		// several addresses at once (link-local, stable, and privacy addresses).
-		if observation.IP.Is4() {
+		// IPv4 leases are normally treated as replacements, unless two distinct
+		// IPv4 addresses respond on the same MAC within the same active scan
+		// burst (<750ms, e.g. a proxy-ARP Wi-Fi range extender).
+		proxyARPBurst := observation.IP.Is4() && !observation.SeenAt.IsZero() &&
+			!existing.lastIPv4Seen.IsZero() && seenAt.Sub(existing.lastIPv4Seen) >= 0 &&
+			seenAt.Sub(existing.lastIPv4Seen) < 750*time.Millisecond
+		if observation.IP.Is4() && !proxyARPBurst {
 			for _, address := range existing.Addresses {
 				if address.Is4() && r.byIP[address] == mac {
 					delete(r.byIP, address)
@@ -202,6 +217,9 @@ func (r *Registry) ObserveDetailed(observation Observation) (ObservationResult, 
 		if existing.Name == previousIP.String() && existing.IP != previousIP {
 			existing.Name = existing.IP.String()
 		}
+	}
+	if observation.IP.Is4() && !observation.SeenAt.IsZero() && seenAt.After(existing.lastIPv4Seen) {
+		existing.lastIPv4Seen = seenAt
 	}
 	r.byIP[observation.IP] = mac
 	if existing.addressSeen == nil {

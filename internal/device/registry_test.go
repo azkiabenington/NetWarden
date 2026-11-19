@@ -201,3 +201,31 @@ func TestRegistryRestoresOnlyValidPeersOffline(t *testing.T) {
 		t.Fatalf("unexpected restored devices: %#v", devices)
 	}
 }
+
+func TestRegistryAssignsStrictlyIncreasingFirstSeenAndRetainsProxyARPBurst(t *testing.T) {
+	registry := NewRegistry()
+	sameInstant := time.Date(2026, 11, 19, 7, 0, 0, 0, time.UTC)
+	macA, _ := net.ParseMAC("02:00:00:00:00:a1")
+	macB, _ := net.ParseMAC("02:00:00:00:00:b2")
+
+	first, _, err := registry.Observe(Observation{IP: netip.MustParseAddr("192.168.100.45"), MAC: macA, SeenAt: sameInstant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := registry.Observe(Observation{IP: netip.MustParseAddr("192.168.100.19"), MAC: macB, SeenAt: sameInstant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.FirstSeen.After(first.FirstSeen) {
+		t.Fatalf("second.FirstSeen (%v) was not after first.FirstSeen (%v)", second.FirstSeen, first.FirstSeen)
+	}
+
+	// Proxy-ARP range-extender burst (<750ms) on macA retains the original primary IPv4.
+	burst, _, err := registry.Observe(Observation{IP: netip.MustParseAddr("192.168.100.107"), MAC: macA, SeenAt: sameInstant.Add(120 * time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if burst.IP != netip.MustParseAddr("192.168.100.45") || len(burst.Addresses) != 2 {
+		t.Fatalf("unexpected proxy-ARP burst state: %#v", burst)
+	}
+}
