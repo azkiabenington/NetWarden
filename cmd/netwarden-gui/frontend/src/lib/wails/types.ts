@@ -165,3 +165,130 @@ export type BandwidthHealth = {
   samplingError?: string
 }
 export type AppInfo = { name: string; version: string; build: string }
+
+export type PingSample = {
+  seq: number
+  success: boolean
+  rttMs: number
+  ttl?: number
+  error?: string
+}
+export type PingResult = {
+  target: string
+  resolvedIp: string
+  sent: number
+  received: number
+  lossPercent: number
+  minMs: number
+  avgMs: number
+  maxMs: number
+  jitterMs: number
+  samples: PingSample[]
+}
+export type TraceHop = {
+  hop: number
+  ip?: string
+  hostname?: string
+  rttMs: number
+  reached: boolean
+  timeout: boolean
+}
+export type TraceRouteResult = {
+  target: string
+  resolvedIp: string
+  reached: boolean
+  hops: TraceHop[]
+}
+export type WiFiNetwork = {
+  ssid: string
+  bssid: string
+  vendor?: string
+  rssiDbm: number
+  signalQuality: number
+  channel: number
+  frequencyMhz: number
+  band: string
+  collisionRisk: string
+  sameChannelAp: number
+}
+export type WiFiScanResult = {
+  interfaceName: string
+  scannedAt: string
+  networks: WiFiNetwork[]
+}
+export type OpenPort = {
+  port: number
+  protocol: string
+  service: string
+  banner?: string
+  risk: string
+  note?: string
+  rttMs: number
+}
+export type PortScanResult = {
+  target: string
+  resolvedIp: string
+  probedCount: number
+  durationMs: number
+  openPorts: OpenPort[]
+}
+export type UPnPMapping = {
+  protocol: string
+  externalPort: number
+  internalClient: string
+  internalPort: number
+  description: string
+  enabled: boolean
+}
+export type RouterVulnerabilityFinding = {
+  severity: string
+  title: string
+  detail: string
+  recommendation: string
+}
+export type RouterVulnerabilityResult = {
+  gatewayIp: string
+  status: string
+  upnpEnabled: boolean
+  natPmpEnabled: boolean
+  upnpMappings: UPnPMapping[]
+  openPorts: OpenPort[]
+  findings: RouterVulnerabilityFinding[]
+}
+export type HiddenCameraSuspect = {
+  ip: string
+  mac: string
+  name: string
+  vendor: string
+  confidence: string
+  openPorts: number[]
+  reasons: string[]
+}
+export type HiddenCameraResult = {
+  scannedHosts: number
+  suspects: HiddenCameraSuspect[]
+}
+export type ProviderBenchmark = {
+  name: string
+  address: string
+  category: string
+  reachable: boolean
+  latencyMs: number
+  jitterMs: number
+  lossPercent: number
+  recommended: boolean
+}
+export type InternetHealthResult = {
+  status: string
+  summary: string
+  publicIp?: string
+  isp?: string
+  city?: string
+  region?: string
+  country?: string
+  gatewayIp?: string
+  gatewayLatencyMs: number
+  internetLatencyMs: number
+  outageDetected: boolean
+  providers: ProviderBenchmark[]
+}

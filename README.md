@@ -36,6 +36,15 @@ Key engineering principles:
 - **Global Bandwidth Limit & Global Traffic Monitoring**:
   - **Global Traffic Monitoring**: One-click toggle to monitor live upload/download speeds, totals, peaks, and historical usage across all online devices, automatically attaching to new devices as they join the LAN.
   - **Global Bandwidth Limit**: Configure a network-wide Download and Upload speed cap (`MB/s` or `Mbps`) that applies to all online non-whitelisted devices and automatically enforces itself on newly connected non-whitelisted peers.
+- **Built-in Network Troubleshooting & Security Tools Suite (`Tools` Tab)**:
+  - **Ping**: Visual RTT latency bar chart, packet loss, min/avg/max, and jitter using native in-process Win32 `IcmpSendEcho` (`iphlpapi.dll`) with TCP latency fallback.
+  - **Trace Route**: Hop-by-hop router path discovery and transit delay measurement with automatic reverse DNS lookup.
+  - **Wi-Fi Scanner**: Native Win32 `wlanapi.dll` BSS scanner showing nearby Wireless Access Points, SSID, BSSID, IEEE OUI vendor, RSSI (`dBm`), signal quality (`%`), channel/frequency (`2.4 GHz` / `5 GHz` / `6 GHz`), and channel collision risk.
+  - **Wake on LAN**: Broadcasts IEEE 802 Magic Packets (`UDP 9` & `7`) to wake sleeping hosts on the subnet.
+  - **Find Open Ports**: Multi-threaded TCP port scanner with service banner grabbing and risk classification (`Common`, `Web`, `Admin/DB/Shares`, `Camera/RTSP/ONVIF`).
+  - **Router Vulnerability Check**: Audits the default gateway for exposed UPnP IGD port mappings, NAT-PMP (`UDP 5351`), TR-069 (`TCP 7547`), Telnet (`23`), FTP (`21`), and SMB (`445`).
+  - **Find Hidden Camera**: Scans discovered LAN hosts for surveillance OUI manufacturers, RTSP (`554`/`8554`), ONVIF (`8899`), Hikvision (`8000`), Dahua (`37777`), Xiongmai (`34567`), and RTMP (`1935`) streaming endpoints.
+  - **Internet Outages & Provider Comparison**: Inspects public ISP/ASN metadata, diagnoses local vs. upstream outages, and ranks the fastest DNS/backbone providers (`Cloudflare`, `Google`, `Quad9`, `OpenDNS`) in your area.
 - **Dual-Stack (`IPv4` + `IPv6`) Traffic Shaping & Isolation**: Token-bucket rate limiting and weighted-fair per-flow scheduling across a device's primary IPv4 address and all learned link-local/global/privacy IPv6 addresses under one MAC identity.
 - **Gateway Security & Spoofing Detection**: Passively monitors ARP announcements and IPv6 Router Advertisements (`RA`), alerting on gateway MAC conflicts, rogue routers, or unexpected prefix changes, with optional trusted gateway MAC pinning.
 

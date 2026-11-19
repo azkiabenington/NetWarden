@@ -124,6 +124,18 @@ func (r *Resolver) Enrich(snapshot device.Device) device.Metadata {
 	return result
 }
 
+func LookupVendor(mac net.HardwareAddr) string {
+	r, err := NewResolver(nil)
+	if err != nil {
+		return "Unknown"
+	}
+	normalized := normalizeHardwareAddress(mac.String())
+	if len(normalized) != 12 {
+		return "Unknown"
+	}
+	return resolveVendor(normalized, r.vendors)
+}
+
 func resolveVendor(mac string, vendors map[string]string) string {
 	if len(mac) != 12 {
 		return "Unknown"

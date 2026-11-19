@@ -6,6 +6,7 @@ import { SettingsView } from "@/features/settings/SettingsView"
 import { DiagnosticsView } from "@/features/diagnostics/DiagnosticsView"
 import { useUnsavedChanges } from "@/app/unsaved-changes"
 import { BandwidthMonitorView } from "@/features/bandwidth/BandwidthMonitorView"
+import { ToolsView } from "@/features/tools/ToolsView"
 
 export default function App() {
   const [view, setView] = useState<AppView>("devices")
@@ -18,6 +19,7 @@ export default function App() {
     <AppShell view={view} onViewChange={changeView}>
       {view === "devices" && <DevicesView />}
       {view === "bandwidth" && <BandwidthMonitorView />}
+      {view === "tools" && <ToolsView />}
       {view === "integrity" && (
         <section className="py-7 sm:py-9">
           <IntegrityView />

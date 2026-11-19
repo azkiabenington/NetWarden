@@ -12,11 +12,18 @@ import type {
   ControlAudit,
   Device,
   GlobalBandwidthSettings,
+  HiddenCameraResult,
   HistorySummary,
 	IPv6Network,
+  InternetHealthResult,
   MonitoringSettings,
   NotificationSettings,
+  PingResult,
+  PortScanResult,
+  RouterVulnerabilityResult,
   RuntimeStatus,
+  TraceRouteResult,
+  WiFiScanResult,
 } from "./types"
 
 const backend = () => {
@@ -75,6 +82,14 @@ export const wailsClient = {
   globalBandwidthSettings: () => backend().GlobalBandwidthSettings() as Promise<GlobalBandwidthSettings>,
   setGlobalBandwidthSettings: (settings: GlobalBandwidthSettings) =>
     backend().SetGlobalBandwidthSettings(settings) as Promise<void>,
+  pingHost: (target: string, count: number) => backend().PingHost(target, count) as Promise<PingResult>,
+  traceRoute: (target: string, maxHops: number) => backend().TraceRoute(target, maxHops) as Promise<TraceRouteResult>,
+  scanWiFi: () => backend().ScanWiFi() as Promise<WiFiScanResult>,
+  wakeOnLAN: (mac: string, targetIP: string) => backend().WakeOnLAN(mac, targetIP) as Promise<void>,
+  scanPorts: (target: string, preset: string) => backend().ScanPorts(target, preset) as Promise<PortScanResult>,
+  checkRouterVulnerabilities: () => backend().CheckRouterVulnerabilities() as Promise<RouterVulnerabilityResult>,
+  detectHiddenCameras: () => backend().DetectHiddenCameras() as Promise<HiddenCameraResult>,
+  checkInternetHealth: () => backend().CheckInternetHealth() as Promise<InternetHealthResult>,
   openConfigurationDirectory: () => backend().OpenConfigurationDirectory() as Promise<void>,
   openLogDirectory: () => backend().OpenLogDirectory() as Promise<void>,
 }
