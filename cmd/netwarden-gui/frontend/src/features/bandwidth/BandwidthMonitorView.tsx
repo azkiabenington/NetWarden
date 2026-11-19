@@ -22,6 +22,7 @@ import {
   useStopAllBandwidthMonitors,
 } from "./monitor.queries"
 import { useBandwidthLimits } from "./bandwidth.queries"
+import { GlobalBandwidthCard } from "./GlobalBandwidthCard"
 import { formatBytes, formatRate } from "./monitor-format"
 import { useRateUnit } from "@/lib/measurement"
 
@@ -64,6 +65,7 @@ export function BandwidthMonitorView() {
         <h2 className="text-2xl font-semibold tracking-tight">Bandwidth monitor</h2>
         <p className="mt-2 text-sm text-muted-foreground">Live per-device rates, totals, peaks, and one hour of recent history.</p>
       </div>
+      <GlobalBandwidthCard />
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricCard label="Current download" value={formatRate(totals.download, rateUnit)} icon={<ArrowDown />} />
         <MetricCard label="Current upload" value={formatRate(totals.upload, rateUnit)} icon={<ArrowUp />} />

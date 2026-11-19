@@ -13,6 +13,13 @@ export type Device = {
   lastSeen: string
   online: boolean
   controlState: DeviceControlState
+  whitelisted?: boolean
+}
+export type GlobalBandwidthSettings = {
+  trafficMonitoring: boolean
+  bandwidthLimitEnabled: boolean
+  downloadBitsPerSecond: number
+  uploadBitsPerSecond: number
 }
 export type Conflict = {
   gatewayIP: string

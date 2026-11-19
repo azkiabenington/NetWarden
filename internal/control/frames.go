@@ -35,15 +35,21 @@ func isolationFrame(localMAC net.HardwareAddr, gateway, target Endpoint) ([]byte
 }
 
 // restorationFrame advertises the gateway's verified address mapping back to
-// the target. It is used immediately on restore and during graceful shutdown.
-func restorationFrame(gateway, target Endpoint) ([]byte, error) {
+// the target. It uses localMAC as the outer Ethernet source when provided so
+// 802.11 station-mode Wi-Fi drivers accept the frame while the ARP payload
+// restores the gateway's hardware address.
+func restorationFrame(localMAC net.HardwareAddr, gateway, target Endpoint) ([]byte, error) {
 	if err := validateEndpoint(gateway); err != nil {
 		return nil, fmt.Errorf("gateway: %w", err)
 	}
 	if err := validateEndpoint(target); err != nil {
 		return nil, fmt.Errorf("target: %w", err)
 	}
-	return packet.MarshalARP(target.MAC, gateway.MAC, packet.ARP{
+	ethernetSource := gateway.MAC
+	if len(localMAC) == 6 && !zeroMAC(localMAC) && localMAC[0]&1 == 0 {
+		ethernetSource = localMAC
+	}
+	return packet.MarshalARP(target.MAC, ethernetSource, packet.ARP{
 		Operation: packet.ARPOpReply,
 		SenderMAC: gateway.MAC,
 		SenderIP:  gateway.IP,

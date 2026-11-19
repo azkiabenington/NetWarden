@@ -624,11 +624,11 @@ func (s *bandwidthSession) redirectAddress(ctx context.Context, target bandwidth
 	s.mu.RLock()
 	gatewayMAC := append(net.HardwareAddr(nil), s.gatewayMAC...)
 	s.mu.RUnlock()
-	toDevice, err := arpReply(target.mac, s.localMAC, s.localMAC, s.gatewayIP, target.mac, target.ip)
+	toDevice, err := arpReply(target.mac, s.localMAC, s.localMAC, s.gatewayIP, target.mac, address)
 	if err != nil {
 		return err
 	}
-	toGateway, err := arpReply(gatewayMAC, s.localMAC, s.localMAC, target.ip, gatewayMAC, s.gatewayIP)
+	toGateway, err := arpReply(gatewayMAC, s.localMAC, s.localMAC, address, gatewayMAC, s.gatewayIP)
 	if err != nil {
 		return err
 	}
@@ -656,11 +656,11 @@ func (s *bandwidthSession) restoreAddress(ctx context.Context, target bandwidthT
 	if len(gatewayMAC) != 6 {
 		return errors.New("cannot restore bandwidth path without a verified gateway MAC")
 	}
-	toDevice, err := arpReply(target.mac, gatewayMAC, gatewayMAC, s.gatewayIP, target.mac, target.ip)
+	toDevice, err := arpReply(target.mac, s.localMAC, gatewayMAC, s.gatewayIP, target.mac, address)
 	if err != nil {
 		return err
 	}
-	toGateway, err := arpReply(gatewayMAC, target.mac, target.mac, target.ip, gatewayMAC, s.gatewayIP)
+	toGateway, err := arpReply(gatewayMAC, s.localMAC, target.mac, address, gatewayMAC, s.gatewayIP)
 	if err != nil {
 		return err
 	}
@@ -701,11 +701,11 @@ func (s *bandwidthSession) ndpRestore(ctx context.Context, target bandwidthTarge
 	if !routerIP.Is6() || len(routerMAC) != 6 {
 		return errors.New("cannot restore IPv6 path without a verified router identity")
 	}
-	toDevice, err := packet.MarshalNeighborAdvertisement(packet.NeighborAdvertisement{SourceIP: routerIP, DestinationIP: address, TargetIP: routerIP, SourceMAC: routerMAC, DestinationMAC: target.mac, AdvertisedMAC: routerMAC, Router: true, Solicited: true, Override: true})
+	toDevice, err := packet.MarshalNeighborAdvertisement(packet.NeighborAdvertisement{SourceIP: routerIP, DestinationIP: address, TargetIP: routerIP, SourceMAC: s.localMAC, DestinationMAC: target.mac, AdvertisedMAC: routerMAC, Router: true, Solicited: true, Override: true})
 	if err != nil {
 		return err
 	}
-	toRouter, err := packet.MarshalNeighborAdvertisement(packet.NeighborAdvertisement{SourceIP: address, DestinationIP: routerIP, TargetIP: address, SourceMAC: target.mac, DestinationMAC: routerMAC, AdvertisedMAC: target.mac, Solicited: true, Override: true})
+	toRouter, err := packet.MarshalNeighborAdvertisement(packet.NeighborAdvertisement{SourceIP: address, DestinationIP: routerIP, TargetIP: address, SourceMAC: s.localMAC, DestinationMAC: routerMAC, AdvertisedMAC: target.mac, Solicited: true, Override: true})
 	if err != nil {
 		return err
 	}

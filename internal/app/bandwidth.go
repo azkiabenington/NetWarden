@@ -97,9 +97,10 @@ func (s *BandwidthService) Set(ctx context.Context, target ControlTarget, policy
 	if err := s.setLimit(ctx, resolved, policy); err != nil {
 		return fmt.Errorf("set bandwidth limit: %w", err)
 	}
+	key, _ := bandwidthMACKey(resolved.MAC)
 	s.mu.Lock()
 	resolved.Policy = policy
-	s.active[resolved.MAC.String()] = resolved
+	s.active[key] = resolved
 	s.mu.Unlock()
 	return nil
 }
@@ -355,18 +356,27 @@ func (s *BandwidthService) resolve(target ControlTarget) (BandwidthTarget, error
 		return BandwidthTarget{}, ErrBandwidthTarget
 	}
 	current, found := s.devices.Get(key)
-	if !found || !current.Online || current.Role != device.RolePeer || current.IP != target.IP {
+	if !found || !current.Online || current.Role != device.RolePeer {
+		return BandwidthTarget{}, ErrBandwidthTarget
+	}
+	addresses := eligibleBandwidthAddresses(current)
+	if len(addresses) == 0 || (current.IP != target.IP && !containsBandwidthAddr(addresses, target.IP)) {
 		return BandwidthTarget{}, ErrBandwidthTarget
 	}
 	mac, err := net.ParseMAC(current.MAC)
 	if err != nil {
 		return BandwidthTarget{}, ErrBandwidthTarget
 	}
-	addresses := eligibleBandwidthAddresses(current)
-	if len(addresses) == 0 {
-		return BandwidthTarget{}, ErrBandwidthTarget
-	}
 	return BandwidthTarget{IP: current.IP, Addresses: addresses, MAC: mac}, nil
+}
+
+func containsBandwidthAddr(addresses []netip.Addr, target netip.Addr) bool {
+	for _, address := range addresses {
+		if address == target {
+			return true
+		}
+	}
+	return false
 }
 
 func eligibleBandwidthAddresses(current device.Device) []netip.Addr {

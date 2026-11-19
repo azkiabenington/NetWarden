@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
-import { ArrowDown, ArrowUp, ChevronRight, LoaderCircle } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronRight, LoaderCircle, Shield, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { announce } from "@/lib/accessibility"
 import { formatDate } from "@/lib/format"
@@ -8,6 +9,7 @@ import type { Device } from "@/lib/wails/types"
 import type { BandwidthLimit } from "@/lib/wails/types"
 import { bandwidthSummary } from "@/features/bandwidth/format"
 import { type DeviceSortKey, isControlEligible } from "./device-list"
+import { useSetDeviceWhitelisted } from "./devices.queries"
 import { useRateUnit } from "@/lib/measurement"
 
 const sortableColumns: Array<{ key: DeviceSortKey; label: string }> = [
@@ -120,6 +122,7 @@ function DeviceRow({
   onOpen: (trigger: HTMLElement) => void
 }) {
   const { rateUnit } = useRateUnit()
+  const whitelistMutation = useSetDeviceWhitelisted()
   const controlled = device.controlState !== ""
   const control =
     device.controlState === "active"
@@ -132,9 +135,11 @@ function DeviceRow({
             ? "Recovery failed"
             : device.role !== "Device"
               ? "Protected"
-              : device.online
-                ? "Available"
-                : "Offline"
+              : device.whitelisted
+                ? "Whitelisted"
+                : device.online
+                  ? "Available"
+                  : "Offline"
   return (
     <TableRow
       tabIndex={0}
@@ -171,7 +176,15 @@ function DeviceRow({
             className={`size-2 rounded-full ${device.online ? "bg-primary shadow-[0_0_8px_var(--primary)]" : "bg-muted-foreground/60"}`}
           />
           <div>
-            <p className="font-medium">{device.name || device.ip}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="font-medium">{device.name || device.ip}</p>
+              {device.whitelisted && (
+                <Badge variant="outline" className="h-4 gap-0.5 px-1 text-[10px] text-primary">
+                  <ShieldCheck className="size-2.5" />
+                  Whitelist
+                </Badge>
+              )}
+            </div>
             <p className="font-mono text-[10px] text-muted-foreground">{device.mac}</p>
           </div>
         </div>
@@ -208,8 +221,34 @@ function DeviceRow({
         {bandwidthSummary(bandwidthLimit, rateUnit)}
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">{formatDate(device.lastSeen)}</TableCell>
-      <TableCell>
-        <ChevronRight className="size-4 text-muted-foreground" />
+      <TableCell
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-end gap-1">
+          {device.role === "Device" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={
+                device.whitelisted
+                  ? `Remove ${device.name || device.ip} from whitelist`
+                  : `Add ${device.name || device.ip} to whitelist`
+              }
+              title={device.whitelisted ? "Remove from whitelist" : "Add to whitelist"}
+              disabled={whitelistMutation.isPending}
+              onClick={() => whitelistMutation.mutate({ mac: device.mac, whitelisted: !device.whitelisted })}
+            >
+              {device.whitelisted ? (
+                <ShieldCheck className="size-4 text-primary" />
+              ) : (
+                <Shield className="size-4 text-muted-foreground" />
+              )}
+            </Button>
+          )}
+          <ChevronRight className="size-4 text-muted-foreground" />
+        </div>
       </TableCell>
     </TableRow>
   )

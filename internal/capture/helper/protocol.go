@@ -269,7 +269,7 @@ func ValidateControlFrame(frame []byte, localMAC, gatewayMAC net.HardwareAddr, l
 		len(message.TargetMAC) != 6 || message.TargetMAC[0]&1 != 0 || bytes.Equal(message.TargetMAC, localMAC) || bytes.Equal(message.TargetMAC, gatewayMAC) {
 		return errors.New("control target is outside the eligible local network")
 	}
-	if !bytes.Equal(frame[0:6], message.TargetMAC) || !bytes.Equal(frame[6:12], message.SenderMAC) {
+	if !bytes.Equal(frame[0:6], message.TargetMAC) || (!bytes.Equal(frame[6:12], message.SenderMAC) && !bytes.Equal(frame[6:12], localMAC)) {
 		return errors.New("control Ethernet and ARP identities do not match")
 	}
 	isolation := bytes.Equal(message.SenderMAC, localMAC)

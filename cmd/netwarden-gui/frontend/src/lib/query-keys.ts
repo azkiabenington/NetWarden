@@ -15,5 +15,6 @@ export const queryKeys = {
   bandwidthMonitors: ["runtime", "bandwidth-monitors"] as const,
   bandwidthMeasurements: ["runtime", "bandwidth-measurements"] as const,
   bandwidthHealth: ["runtime", "bandwidth-health"] as const,
+  globalBandwidthSettings: ["runtime", "global-bandwidth-settings"] as const,
   bandwidthHistory: (mac: string, range: string) => ["runtime", "bandwidth-history", mac, range] as const,
 }

@@ -273,6 +273,41 @@ func TestBandwidthSessionRedirectsAndRestoresEveryDualStackRoute(t *testing.T) {
 	}
 }
 
+func TestBandwidthSessionRedirectsAndRestoresEveryIPv4Route(t *testing.T) {
+	local := mustHelperMAC(t, "02:00:00:00:00:10")
+	gateway := mustHelperMAC(t, "02:00:00:00:00:01")
+	device := mustHelperMAC(t, "02:00:00:00:00:20")
+	gatewayIP := netip.MustParseAddr("192.168.1.1")
+	primaryIP := netip.MustParseAddr("192.168.1.20")
+	secondaryIP := netip.MustParseAddr("192.168.1.21")
+	recorder := &bandwidthRecorder{sent: make(chan []byte, 32)}
+	session, err := newBandwidthSession(context.Background(), local, netip.MustParseAddr("192.168.1.10"), gatewayIP, netip.MustParsePrefix("192.168.1.10/24"), recorder.send)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.close() })
+	session.observeGateway(gateway)
+
+	addresses := []netip.Addr{primaryIP, secondaryIP}
+	if err := session.monitorRoutes(context.Background(), addresses, device); err != nil {
+		t.Fatal(err)
+	}
+	assertARPIdentity(t, receiveBandwidthFrame(t, recorder.sent), gatewayIP, local, primaryIP, device)
+	assertARPIdentity(t, receiveBandwidthFrame(t, recorder.sent), primaryIP, local, gatewayIP, gateway)
+	assertARPIdentity(t, receiveBandwidthFrame(t, recorder.sent), gatewayIP, local, secondaryIP, device)
+	assertARPIdentity(t, receiveBandwidthFrame(t, recorder.sent), secondaryIP, local, gatewayIP, gateway)
+
+	if err := session.removeMonitorRoutes(context.Background(), addresses, device); err != nil {
+		t.Fatal(err)
+	}
+	for _, expectedIP := range addresses {
+		for range 2 {
+			assertARPIdentity(t, receiveBandwidthFrame(t, recorder.sent), gatewayIP, gateway, expectedIP, device)
+			assertARPIdentity(t, receiveBandwidthFrame(t, recorder.sent), expectedIP, device, gatewayIP, gateway)
+		}
+	}
+}
+
 func TestBandwidthSessionTransitionsMonitorLimitAndBackWithoutRestoringEarly(t *testing.T) {
 	local := mustHelperMAC(t, "02:00:00:00:00:10")
 	gateway := mustHelperMAC(t, "02:00:00:00:00:01")

@@ -15,12 +15,15 @@ import (
 )
 
 func configureCapture(ctx context.Context, dependencies *coreapp.Dependencies) error {
-	if os.Geteuid() == 0 {
-		return nil
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate NetWarden executable: %w", err)
+	}
+	if os.Geteuid() == 0 {
+		dependencies.Open = func(interfaceName string) (capture.Driver, error) {
+			return helperclient.Open(ctx, executable, "capture-helper", "--interface", interfaceName)
+		}
+		return nil
 	}
 	pkexec, err := exec.LookPath("pkexec")
 	if err != nil {

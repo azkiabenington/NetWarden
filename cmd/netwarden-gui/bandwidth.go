@@ -7,11 +7,16 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"sort"
+	"strings"
 	"time"
 
 	coreapp "github.com/amdzy/NetWarden/internal/app"
+	appconfig "github.com/amdzy/NetWarden/internal/config"
+	"github.com/amdzy/NetWarden/internal/device"
 	"github.com/amdzy/NetWarden/internal/shaping"
 	trafficmetrics "github.com/amdzy/NetWarden/internal/traffic"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type BandwidthLimitDTO struct {
@@ -149,9 +154,12 @@ func (a *GUIApp) BandwidthLimits() ([]BandwidthLimitDTO, error) {
 }
 
 func (a *GUIApp) SetBandwidthLimit(ipText, macText string, downloadBitsPerSecond, uploadBitsPerSecond uint64, burstBytes int) error {
-	runtime, err := a.activeRuntime()
+	activeRuntime, err := a.activeRuntime()
 	if err != nil {
 		return err
+	}
+	if _, config, cfgErr := loadSettings(); cfgErr == nil && config.IsWhitelisted(macText) {
+		return errors.New("device is whitelisted; remove it from the whitelist before applying a bandwidth limit")
 	}
 	ip, err := netip.ParseAddr(ipText)
 	if err != nil {
@@ -163,7 +171,7 @@ func (a *GUIApp) SetBandwidthLimit(ipText, macText string, downloadBitsPerSecond
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
 	defer cancel()
-	err = runtime.SetBandwidthLimit(ctx, coreapp.ControlTarget{IP: ip, MAC: mac}, shaping.Policy{
+	err = activeRuntime.SetBandwidthLimit(ctx, coreapp.ControlTarget{IP: ip, MAC: mac}, shaping.Policy{
 		DownloadBitsPerSecond: downloadBitsPerSecond,
 		UploadBitsPerSecond:   uploadBitsPerSecond,
 		BurstBytes:            burstBytes,
@@ -189,13 +197,18 @@ func (a *GUIApp) RemoveBandwidthLimit(macText string) error {
 }
 
 func (a *GUIApp) ClearBandwidthLimits() error {
-	runtime, err := a.activeRuntime()
+	if store, config, cfgErr := loadSettings(); cfgErr == nil && config.GlobalBandwidthLimitEnabled {
+		settings := config.GlobalBandwidthSettings()
+		settings.BandwidthLimitEnabled = false
+		_, _ = store.SetGlobalBandwidthSettings(settings)
+	}
+	activeRuntime, err := a.activeRuntime()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
 	defer cancel()
-	err = runtime.ClearBandwidthLimits(ctx)
+	err = activeRuntime.ClearBandwidthLimits(ctx)
 	a.logBandwidthResult("clear", "", "", err)
 	return err
 }
@@ -335,6 +348,7 @@ func (a *GUIApp) BandwidthHistory(macText, rangeText string) ([]BandwidthBucketD
 				buckets = append(buckets, bucket)
 			}
 		}
+		sort.Slice(buckets, func(i, j int) bool { return buckets[i].Start.Before(buckets[j].Start) })
 	} else {
 		return nil, loadErr
 	}
@@ -450,4 +464,157 @@ func (a *GUIApp) logBandwidthResult(operation, ip, mac string, err error) {
 		level, message = slog.LevelError, "bandwidth action failed"
 	}
 	a.log(level, message, "component", "bandwidth", "operation", operation, "ip", ip, "mac", mac, "error", err)
+}
+
+func (a *GUIApp) SetDeviceWhitelisted(macText string, whitelisted bool) error {
+	mac, err := net.ParseMAC(macText)
+	if err != nil {
+		return fmt.Errorf("parse target MAC: %w", err)
+	}
+	store, _, err := loadSettings()
+	if err != nil {
+		return err
+	}
+	if _, err := store.SetWhitelisted(mac, whitelisted); err != nil {
+		return err
+	}
+	if activeRuntime, runErr := a.activeRuntime(); runErr == nil {
+		baseCtx := a.ctx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
+		defer cancel()
+		if whitelisted {
+			_ = activeRuntime.RemoveBandwidthLimit(ctx, mac)
+			for _, dev := range activeRuntime.Devices() {
+				if strings.EqualFold(dev.MAC, mac.String()) {
+					_ = a.RestoreControl(dev.IP.String(), dev.MAC)
+					break
+				}
+			}
+		} else {
+			_ = a.reconcileGlobalBandwidth(ctx, activeRuntime)
+		}
+	}
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "runtime:changed")
+	}
+	return nil
+}
+
+func (a *GUIApp) GlobalBandwidthSettings() (appconfig.GlobalBandwidthSettings, error) {
+	_, config, err := loadSettings()
+	if err != nil {
+		return appconfig.GlobalBandwidthSettings{}, err
+	}
+	return config.GlobalBandwidthSettings(), nil
+}
+
+func (a *GUIApp) SetGlobalBandwidthSettings(settings appconfig.GlobalBandwidthSettings) error {
+	store, previous, err := loadSettings()
+	if err != nil {
+		return err
+	}
+	if _, err := store.SetGlobalBandwidthSettings(settings); err != nil {
+		return err
+	}
+	if activeRuntime, runErr := a.activeRuntime(); runErr == nil {
+		baseCtx := a.ctx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, 25*time.Second)
+		defer cancel()
+		if previous.GlobalBandwidthLimitEnabled && !settings.BandwidthLimitEnabled {
+			if clearErr := activeRuntime.ClearBandwidthLimits(ctx); clearErr != nil {
+				return clearErr
+			}
+		}
+		if previous.GlobalTrafficMonitoring && !settings.TrafficMonitoring && !settings.BandwidthLimitEnabled {
+			if stopErr := activeRuntime.StopAllBandwidthMonitors(ctx); stopErr != nil {
+				return stopErr
+			}
+		}
+		if err := a.reconcileGlobalBandwidth(ctx, activeRuntime); err != nil {
+			return err
+		}
+	}
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "runtime:changed")
+	}
+	return nil
+}
+
+func (a *GUIApp) reconcileGlobalBandwidthAsync() {
+	activeRuntime, err := a.activeRuntime()
+	if err != nil {
+		return
+	}
+	baseCtx := a.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 20*time.Second)
+	defer cancel()
+	if err := a.reconcileGlobalBandwidth(ctx, activeRuntime); err == nil && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "runtime:changed")
+	}
+}
+
+func (a *GUIApp) reconcileGlobalBandwidth(ctx context.Context, activeRuntime *coreapp.Runtime) error {
+	_, config, err := loadSettings()
+	if err != nil {
+		return err
+	}
+	if !config.GlobalTrafficMonitoring && !config.GlobalBandwidthLimitEnabled {
+		return nil
+	}
+	monitoredSet := make(map[string]bool)
+	for _, target := range activeRuntime.BandwidthMonitors() {
+		monitoredSet[strings.ToLower(target.MAC.String())] = true
+	}
+	limitedMap := make(map[string]shaping.Policy)
+	for _, target := range activeRuntime.BandwidthLimits() {
+		limitedMap[strings.ToLower(target.MAC.String())] = target.Policy
+	}
+	desiredPolicy := shaping.Policy{
+		DownloadBitsPerSecond: config.GlobalDownloadBitsPerSecond,
+		UploadBitsPerSecond:   config.GlobalUploadBitsPerSecond,
+	}.Effective()
+	var firstErr error
+	for _, dev := range activeRuntime.Devices() {
+		if !dev.Online || dev.Role != device.RolePeer || !dev.IP.IsValid() {
+			continue
+		}
+		mac, parseErr := net.ParseMAC(dev.MAC)
+		if parseErr != nil {
+			continue
+		}
+		key := strings.ToLower(mac.String())
+		whitelisted := config.IsWhitelisted(key)
+		target := coreapp.ControlTarget{IP: dev.IP, MAC: mac}
+		if whitelisted {
+			if _, hasLimit := limitedMap[key]; hasLimit {
+				if remErr := activeRuntime.RemoveBandwidthLimit(ctx, mac); remErr != nil && firstErr == nil {
+					firstErr = remErr
+				}
+			}
+			continue
+		}
+		if config.GlobalTrafficMonitoring && !monitoredSet[key] {
+			if monErr := activeRuntime.StartBandwidthMonitor(ctx, target); monErr != nil && firstErr == nil {
+				firstErr = monErr
+			}
+		}
+		if config.GlobalBandwidthLimitEnabled && (desiredPolicy.DownloadBitsPerSecond > 0 || desiredPolicy.UploadBitsPerSecond > 0) {
+			currentPolicy, hasLimit := limitedMap[key]
+			if !hasLimit || currentPolicy.DownloadBitsPerSecond != desiredPolicy.DownloadBitsPerSecond || currentPolicy.UploadBitsPerSecond != desiredPolicy.UploadBitsPerSecond {
+				if setErr := activeRuntime.SetBandwidthLimit(ctx, target, desiredPolicy); setErr != nil && firstErr == nil {
+					firstErr = setErr
+				}
+			}
+		}
+	}
+	return firstErr
 }

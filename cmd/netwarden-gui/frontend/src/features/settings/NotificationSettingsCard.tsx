@@ -9,11 +9,11 @@ import { useUnsavedChanges } from "@/app/unsaved-changes"
 import { useNotificationSettings, useSetNotificationSettings } from "./settings.queries"
 
 const defaults: NotificationSettings = {
-  enabled: true,
-  newDevices: true,
-  knownDevices: true,
+  enabled: false,
+  newDevices: false,
+  knownDevices: false,
   deviceOffline: false,
-  suspiciousDevices: true,
+  suspiciousDevices: false,
 }
 
 export function NotificationSettingsCard() {

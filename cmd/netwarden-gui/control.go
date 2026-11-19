@@ -12,6 +12,7 @@ import (
 
 	coreapp "github.com/amdzy/NetWarden/internal/app"
 	"github.com/amdzy/NetWarden/internal/controlaudit"
+	"github.com/amdzy/NetWarden/internal/device"
 )
 
 type ControlAuditDTO struct {
@@ -27,6 +28,9 @@ type ControlTargetDTO struct {
 }
 
 func (a *GUIApp) DisconnectDevice(ipText, macText string) error {
+	if _, config, cfgErr := loadSettings(); cfgErr == nil && config.IsWhitelisted(macText) {
+		return errors.New("device is whitelisted; remove it from the whitelist before disconnecting")
+	}
 	commands, target, ctx, cancel, err := a.controlCommand(ipText, macText)
 	if err != nil {
 		return err
@@ -38,12 +42,31 @@ func (a *GUIApp) DisconnectDevice(ipText, macText string) error {
 }
 
 func (a *GUIApp) DisconnectAllDevices() error {
+	activeRuntime, err := a.activeRuntime()
+	if err != nil {
+		return err
+	}
 	commands, ctx, cancel, err := a.controlCommands()
 	if err != nil {
 		return err
 	}
 	defer cancel()
-	err = commands.DisconnectAll(ctx)
+	_, config, _ := loadSettings()
+	var targets []coreapp.ControlTarget
+	for _, dev := range activeRuntime.Devices() {
+		if !dev.Online || dev.Role != device.RolePeer || config.IsWhitelisted(dev.MAC) {
+			continue
+		}
+		mac, parseErr := net.ParseMAC(dev.MAC)
+		if parseErr != nil {
+			continue
+		}
+		targets = append(targets, coreapp.ControlTarget{IP: dev.IP, MAC: mac})
+	}
+	if len(targets) == 0 {
+		return errors.New("no eligible non-whitelisted online devices to disconnect")
+	}
+	err = commands.DisconnectSelected(ctx, targets)
 	a.logControlResult("disconnect_all", "", "", err)
 	return err
 }
@@ -54,8 +77,12 @@ func (a *GUIApp) DisconnectSelectedDevices(selected []ControlTargetDTO) error {
 		return err
 	}
 	defer cancel()
+	_, config, _ := loadSettings()
 	targets := make([]coreapp.ControlTarget, 0, len(selected))
 	for _, value := range selected {
+		if config.IsWhitelisted(value.MAC) {
+			continue
+		}
 		ip, parseErr := netip.ParseAddr(value.IP)
 		if parseErr != nil {
 			return fmt.Errorf("parse target IP: %w", parseErr)
@@ -66,12 +93,18 @@ func (a *GUIApp) DisconnectSelectedDevices(selected []ControlTargetDTO) error {
 		}
 		targets = append(targets, coreapp.ControlTarget{IP: ip, MAC: mac})
 	}
+	if len(targets) == 0 {
+		return errors.New("selected devices are whitelisted")
+	}
 	err = commands.DisconnectSelected(ctx, targets)
 	a.logControlResult("disconnect_selected", "", "", err)
 	return err
 }
 
 func (a *GUIApp) StartContinuousControl(ipText, macText string) error {
+	if _, config, cfgErr := loadSettings(); cfgErr == nil && config.IsWhitelisted(macText) {
+		return errors.New("device is whitelisted; remove it from the whitelist before disconnecting")
+	}
 	commands, target, ctx, cancel, err := a.controlCommand(ipText, macText)
 	if err != nil {
 		return err

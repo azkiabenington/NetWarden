@@ -59,6 +59,7 @@ func OpenWithEnv(ctx context.Context, executable string, environment map[string]
 		return nil, err
 	}
 	command := exec.CommandContext(ctx, executable, arguments...)
+	configureHelperCommand(command)
 	command.Env = mergeEnvironment(os.Environ(), environment)
 	input, err := command.StdinPipe()
 	if err != nil {

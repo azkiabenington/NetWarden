@@ -11,6 +11,7 @@ import type {
   Conflict,
   ControlAudit,
   Device,
+  GlobalBandwidthSettings,
   HistorySummary,
 	IPv6Network,
   MonitoringSettings,
@@ -69,6 +70,11 @@ export const wailsClient = {
   bandwidthMonitorHealth: () => backend().BandwidthMonitorHealth() as Promise<BandwidthHealth>,
   startAllBandwidthMonitors: () => backend().StartAllBandwidthMonitors() as Promise<void>,
   stopAllBandwidthMonitors: () => backend().StopAllBandwidthMonitors() as Promise<void>,
+  setDeviceWhitelisted: (mac: string, whitelisted: boolean) =>
+    backend().SetDeviceWhitelisted(mac, whitelisted) as Promise<void>,
+  globalBandwidthSettings: () => backend().GlobalBandwidthSettings() as Promise<GlobalBandwidthSettings>,
+  setGlobalBandwidthSettings: (settings: GlobalBandwidthSettings) =>
+    backend().SetGlobalBandwidthSettings(settings) as Promise<void>,
   openConfigurationDirectory: () => backend().OpenConfigurationDirectory() as Promise<void>,
   openLogDirectory: () => backend().OpenLogDirectory() as Promise<void>,
 }

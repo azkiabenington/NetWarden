@@ -5,6 +5,7 @@ import { QueryError } from "@/components/QueryError"
 import { useDisconnectSelectedDevices, useRestoreAllControls } from "@/features/control/control.queries"
 import { MonitoringOverview } from "@/features/monitoring/MonitoringOverview"
 import { useBandwidthLimits, useClearBandwidthLimits } from "@/features/bandwidth/bandwidth.queries"
+import { GlobalBandwidthCard } from "@/features/bandwidth/GlobalBandwidthCard"
 import { useBandwidthMonitors } from "@/features/bandwidth/monitor.queries"
 import { useRuntimeStatus } from "@/features/monitoring/monitoring.queries"
 import type { Device } from "@/lib/wails/types"
@@ -33,6 +34,7 @@ export function DevicesView() {
     preferences.query !== "" ||
     preferences.presence !== defaultDevicePreferences.presence ||
     preferences.role !== defaultDevicePreferences.role ||
+    preferences.whitelist !== defaultDevicePreferences.whitelist ||
     preferences.sortBy !== defaultDevicePreferences.sortBy ||
     preferences.descending
   const controlledCount = devices.filter((device) => device.controlState !== "").length
@@ -91,6 +93,7 @@ export function DevicesView() {
   return (
     <>
       <MonitoringOverview />
+      <GlobalBandwidthCard />
       <Card className="overflow-hidden bg-card/60">
         <DeviceToolbar
           visibleCount={visible.length}
@@ -183,6 +186,11 @@ function filterAndSortDevices(devices: Device[], preferences: DevicePreferences)
     )
     .filter((device) => preferences.presence === "all" || (preferences.presence === "online") === device.online)
     .filter((device) => preferences.role === "all" || device.role === preferences.role)
+    .filter(
+      (device) =>
+        preferences.whitelist === "all" ||
+        (preferences.whitelist === "whitelisted" ? Boolean(device.whitelisted) : !device.whitelisted),
+    )
     .sort((left, right) => {
       const leftValue =
         preferences.sortBy === "firstSeen" || preferences.sortBy === "lastSeen"

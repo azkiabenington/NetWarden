@@ -225,7 +225,7 @@ func (c *Controller) shutdown(cause error) error {
 }
 
 func (c *Controller) restoreTarget(ctx context.Context, target Endpoint) error {
-	frame, err := restorationFrame(c.gateway, target)
+	frame, err := restorationFrame(c.local.MAC, c.gateway, target)
 	if err != nil {
 		return err
 	}

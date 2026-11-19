@@ -22,18 +22,20 @@ import (
 )
 
 func configureCapture(ctx context.Context, dependencies *coreapp.Dependencies) error {
-	token, err := windows.OpenCurrentProcessToken()
-	if err == nil {
-		defer token.Close()
-		if token.IsElevated() {
-			return nil
-		}
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate NetWarden executable: %w", err)
 	}
+	isElevated := false
+	if token, tokenErr := windows.OpenCurrentProcessToken(); tokenErr == nil {
+		isElevated = token.IsElevated()
+		_ = token.Close()
+	}
 	dependencies.Open = func(interfaceName string) (capture.Driver, error) {
+		driver, directErr := helperclient.Open(ctx, executable, "capture-helper", "--interface", interfaceName)
+		if directErr == nil || isElevated {
+			return driver, directErr
+		}
 		return openWindowsElevatedHelper(ctx, executable, interfaceName)
 	}
 	return nil

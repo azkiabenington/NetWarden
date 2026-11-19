@@ -40,13 +40,15 @@ export function BandwidthSection({
     setUpload(limit?.uploadBitsPerSecond ? displayRateValue(limit.uploadBitsPerSecond, rateUnit) : "")
   }, [device.mac, limit?.downloadBitsPerSecond, limit?.uploadBitsPerSecond, rateUnit])
   const validation = bandwidthValidation(download, upload)
-  const eligible = available && isBandwidthEligible(device)
+  const eligible = available && isBandwidthEligible(device) && !device.whitelisted
   const pending = setLimit.isPending || removeLimit.isPending
   const reason = !available
     ? "Bandwidth control is unavailable with the active capture backend."
       : device.role !== "Device"
         ? "This protected network endpoint cannot be limited."
-        : device.controlState !== ""
+        : device.whitelisted
+          ? "Whitelisted devices are protected from bandwidth limits."
+          : device.controlState !== ""
         ? "Restore normal access before applying a bandwidth limit."
         : !device.online
           ? "The device must be online before applying a limit."

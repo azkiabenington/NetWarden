@@ -202,7 +202,7 @@ func (s *Scanner) Run(ctx context.Context, prefix netip.Prefix, interval time.Du
 	if interval <= 0 {
 		return errors.New("scan interval must be positive")
 	}
-	if err := s.Scan(ctx, prefix); err != nil {
+	if err := s.Scan(ctx, prefix); err != nil && !errors.Is(err, ErrScanInProgress) {
 		return err
 	}
 	ticker := time.NewTicker(interval)
@@ -215,7 +215,7 @@ func (s *Scanner) Run(ctx context.Context, prefix netip.Prefix, interval time.Du
 			if !s.PeriodicEnabled() {
 				continue
 			}
-			if err := s.Scan(ctx, prefix); err != nil {
+			if err := s.Scan(ctx, prefix); err != nil && !errors.Is(err, ErrScanInProgress) {
 				return err
 			}
 		}

@@ -167,3 +167,37 @@ func TestSeparateStoresDoNotLoseConcurrentUpdates(t *testing.T) {
 		t.Fatalf("got %d nicknames, want %d", len(config.Nicknames), count)
 	}
 }
+
+func TestStorePersistsWhitelistAndGlobalBandwidthSettings(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "config.json"))
+	mac, _ := net.ParseMAC("02:00:00:00:00:aa")
+	if _, err := store.SetWhitelisted(mac, true); err != nil {
+		t.Fatal(err)
+	}
+	wantGlobal := GlobalBandwidthSettings{
+		TrafficMonitoring:     true,
+		BandwidthLimitEnabled: true,
+		DownloadBitsPerSecond: 40_000_000,
+		UploadBitsPerSecond:   20_000_000,
+	}
+	if _, err := store.SetGlobalBandwidthSettings(wantGlobal); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsWhitelisted("02:00:00:00:00:AA") || got.GlobalBandwidthSettings() != wantGlobal {
+		t.Fatalf("unexpected whitelist/global settings: whitelist=%#v global=%#v", got.Whitelist, got.GlobalBandwidthSettings())
+	}
+	if _, err := store.SetWhitelisted(mac, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IsWhitelisted("02:00:00:00:00:aa") {
+		t.Fatal("device remained whitelisted after removal")
+	}
+}

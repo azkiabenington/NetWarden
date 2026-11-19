@@ -13,7 +13,7 @@ import (
 	"sync"
 )
 
-const CurrentVersion = 4
+const CurrentVersion = 5
 
 const (
 	DefaultScanIntervalSeconds  = 10
@@ -29,20 +29,79 @@ var (
 )
 
 type Config struct {
-	Version              int               `json:"version"`
-	Interface            string            `json:"interface,omitempty"`
-	GatewayMAC           string            `json:"gateway_mac,omitempty"`
-	Nicknames            map[string]string `json:"nicknames,omitempty"`
-	ScanIntervalSeconds  int               `json:"scan_interval_seconds"`
-	OfflineAfterSeconds  int               `json:"offline_after_seconds"`
-	HistoryRetentionDays int               `json:"history_retention_days"`
-	AutoStart            bool              `json:"auto_start,omitempty"`
-	PeriodicDiscovery    bool              `json:"periodic_discovery"`
-	NotificationsEnabled bool              `json:"notifications_enabled"`
-	NotifyNewDevices     bool              `json:"notify_new_devices"`
-	NotifyKnownDevices   bool              `json:"notify_known_devices"`
-	NotifyDeviceOffline  bool              `json:"notify_device_offline"`
-	NotifySuspicious     bool              `json:"notify_suspicious"`
+	Version                     int               `json:"version"`
+	Interface                   string            `json:"interface,omitempty"`
+	GatewayMAC                  string            `json:"gateway_mac,omitempty"`
+	Nicknames                   map[string]string `json:"nicknames,omitempty"`
+	Whitelist                   map[string]bool   `json:"whitelist,omitempty"`
+	ScanIntervalSeconds         int               `json:"scan_interval_seconds"`
+	OfflineAfterSeconds         int               `json:"offline_after_seconds"`
+	HistoryRetentionDays        int               `json:"history_retention_days"`
+	AutoStart                   bool              `json:"auto_start,omitempty"`
+	PeriodicDiscovery           bool              `json:"periodic_discovery"`
+	NotificationsEnabled        bool              `json:"notifications_enabled"`
+	NotifyNewDevices            bool              `json:"notify_new_devices"`
+	NotifyKnownDevices          bool              `json:"notify_known_devices"`
+	NotifyDeviceOffline         bool              `json:"notify_device_offline"`
+	NotifySuspicious            bool              `json:"notify_suspicious"`
+	GlobalTrafficMonitoring     bool              `json:"global_traffic_monitoring,omitempty"`
+	GlobalBandwidthLimitEnabled bool              `json:"global_bandwidth_limit_enabled,omitempty"`
+	GlobalDownloadBitsPerSecond uint64            `json:"global_download_bits_per_second,omitempty"`
+	GlobalUploadBitsPerSecond   uint64            `json:"global_upload_bits_per_second,omitempty"`
+}
+
+type GlobalBandwidthSettings struct {
+	TrafficMonitoring     bool   `json:"trafficMonitoring"`
+	BandwidthLimitEnabled bool   `json:"bandwidthLimitEnabled"`
+	DownloadBitsPerSecond uint64 `json:"downloadBitsPerSecond"`
+	UploadBitsPerSecond   uint64 `json:"uploadBitsPerSecond"`
+}
+
+func (s *Store) SetGlobalBandwidthSettings(settings GlobalBandwidthSettings) (Config, error) {
+	if settings.BandwidthLimitEnabled && settings.DownloadBitsPerSecond == 0 && settings.UploadBitsPerSecond == 0 {
+		return Config{}, errors.New("global bandwidth limit requires a download or upload limit greater than 0")
+	}
+	return s.update(func(config *Config) error {
+		config.GlobalTrafficMonitoring = settings.TrafficMonitoring
+		config.GlobalBandwidthLimitEnabled = settings.BandwidthLimitEnabled
+		config.GlobalDownloadBitsPerSecond = settings.DownloadBitsPerSecond
+		config.GlobalUploadBitsPerSecond = settings.UploadBitsPerSecond
+		return nil
+	})
+}
+
+func (s *Store) SetWhitelisted(mac net.HardwareAddr, whitelisted bool) (Config, error) {
+	key, err := normalizeMAC(mac)
+	if err != nil {
+		return Config{}, err
+	}
+	return s.update(func(config *Config) error {
+		if config.Whitelist == nil {
+			config.Whitelist = make(map[string]bool)
+		}
+		if whitelisted {
+			config.Whitelist[key] = true
+		} else {
+			delete(config.Whitelist, key)
+		}
+		return nil
+	})
+}
+
+func (config Config) IsWhitelisted(mac string) bool {
+	if len(config.Whitelist) == 0 {
+		return false
+	}
+	return config.Whitelist[strings.ToLower(strings.TrimSpace(mac))]
+}
+
+func (config Config) GlobalBandwidthSettings() GlobalBandwidthSettings {
+	return GlobalBandwidthSettings{
+		TrafficMonitoring:     config.GlobalTrafficMonitoring,
+		BandwidthLimitEnabled: config.GlobalBandwidthLimitEnabled,
+		DownloadBitsPerSecond: config.GlobalDownloadBitsPerSecond,
+		UploadBitsPerSecond:   config.GlobalUploadBitsPerSecond,
+	}
 }
 
 type NotificationSettings struct {
@@ -224,6 +283,20 @@ func (s *Store) load() (Config, error) {
 	if config.Nicknames == nil {
 		config.Nicknames = make(map[string]string)
 	}
+	if config.Whitelist == nil {
+		config.Whitelist = make(map[string]bool)
+	} else {
+		normalized := make(map[string]bool, len(config.Whitelist))
+		for rawMAC, enabled := range config.Whitelist {
+			if !enabled {
+				continue
+			}
+			if parsed, err := net.ParseMAC(rawMAC); err == nil && len(parsed) == 6 {
+				normalized[strings.ToLower(parsed.String())] = true
+			}
+		}
+		config.Whitelist = normalized
+	}
 	if config.GatewayMAC != "" {
 		mac, err := net.ParseMAC(config.GatewayMAC)
 		if err != nil || len(mac) != 6 {
@@ -281,12 +354,23 @@ func migrate(config *Config) error {
 		config.Version = 3
 		return nil
 	case 3:
-		config.NotificationsEnabled = true
-		config.NotifyNewDevices = true
-		config.NotifyKnownDevices = true
+		config.NotificationsEnabled = false
+		config.NotifyNewDevices = false
+		config.NotifyKnownDevices = false
 		config.NotifyDeviceOffline = false
-		config.NotifySuspicious = true
+		config.NotifySuspicious = false
 		config.Version = 4
+		return nil
+	case 4:
+		config.NotificationsEnabled = false
+		config.NotifyNewDevices = false
+		config.NotifyKnownDevices = false
+		config.NotifyDeviceOffline = false
+		config.NotifySuspicious = false
+		if config.Whitelist == nil {
+			config.Whitelist = make(map[string]bool)
+		}
+		config.Version = 5
 		return nil
 	default:
 		return fmt.Errorf("%w: no migration from version %d", ErrUnsupportedVersion, config.Version)
@@ -330,16 +414,18 @@ func (s *Store) save(config Config) error {
 
 func defaultConfig() Config {
 	return Config{
-		Version: CurrentVersion, Nicknames: make(map[string]string),
+		Version:              CurrentVersion,
+		Nicknames:            make(map[string]string),
+		Whitelist:            make(map[string]bool),
 		ScanIntervalSeconds:  DefaultScanIntervalSeconds,
 		OfflineAfterSeconds:  DefaultOfflineAfterSeconds,
 		HistoryRetentionDays: DefaultHistoryRetentionDays,
 		PeriodicDiscovery:    true,
-		NotificationsEnabled: true,
-		NotifyNewDevices:     true,
-		NotifyKnownDevices:   true,
+		NotificationsEnabled: false,
+		NotifyNewDevices:     false,
+		NotifyKnownDevices:   false,
 		NotifyDeviceOffline:  false,
-		NotifySuspicious:     true,
+		NotifySuspicious:     false,
 	}
 }
 
@@ -348,6 +434,12 @@ func clone(config Config) Config {
 	result.Nicknames = make(map[string]string, len(config.Nicknames))
 	for mac, nickname := range config.Nicknames {
 		result.Nicknames[mac] = nickname
+	}
+	result.Whitelist = make(map[string]bool, len(config.Whitelist))
+	for mac, enabled := range config.Whitelist {
+		if enabled {
+			result.Whitelist[mac] = true
+		}
 	}
 	return result
 }

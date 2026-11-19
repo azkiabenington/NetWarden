@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Ban, Copy, LoaderCircle, RadioTower, RotateCcw } from "lucide-react"
+import { Ban, Copy, LoaderCircle, RadioTower, RotateCcw, Shield, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -23,7 +23,7 @@ import { copyText } from "@/lib/wails/clipboard"
 import type { Device } from "@/lib/wails/types"
 import type { BandwidthLimit } from "@/lib/wails/types"
 import { BandwidthSection } from "@/features/bandwidth/BandwidthSection"
-import { useSetNickname } from "./devices.queries"
+import { useSetDeviceWhitelisted, useSetNickname } from "./devices.queries"
 import { isControlEligible } from "./device-list"
 import {
   useControlAudit,
@@ -80,6 +80,7 @@ export function DeviceDetails({
 }) {
   const [nickname, setNickname] = useState("")
   const mutation = useSetNickname()
+  const whitelistMutation = useSetDeviceWhitelisted()
   useEffect(() => setNickname(device && device.name !== device.ip ? device.name : ""), [device])
   return (
     <Sheet
@@ -125,6 +126,38 @@ export function DeviceDetails({
                 </div>
               </dl>
             </section>
+            {device.role === "Device" && (
+              <>
+                <Separator />
+                <section className="space-y-3 py-6">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-background/30 p-3">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="text-xs font-semibold">Whitelist protection</h4>
+                        {device.whitelisted && (
+                          <Badge variant="outline" className="h-4 px-1 text-[10px] text-primary">
+                            Protected
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Exempt this device from bandwidth limits and network disconnection.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={device.whitelisted ? "default" : "outline"}
+                      disabled={whitelistMutation.isPending}
+                      onClick={() => whitelistMutation.mutate({ mac: device.mac, whitelisted: !device.whitelisted })}
+                    >
+                      {device.whitelisted ? <ShieldCheck /> : <Shield />}
+                      {device.whitelisted ? "Whitelisted" : "Whitelist"}
+                    </Button>
+                  </div>
+                </section>
+              </>
+            )}
             <Separator />
             <ControlSection device={device} bandwidthActive={Boolean(bandwidthLimit) || bandwidthMonitored} />
             <Separator />
@@ -197,7 +230,9 @@ function ControlSection({ device, bandwidthActive }: { device: Device; bandwidth
                 ? "Bandwidth active"
                 : device.role !== "Device"
                   ? "Protected"
-                  : "Offline"
+                  : device.whitelisted
+                    ? "Whitelisted"
+                    : "Offline"
   return (
     <section className="space-y-3 py-6">
       <div className="flex items-center justify-between">

@@ -33,8 +33,10 @@ type GUIApp struct {
 	activity   []ActivityDTO
 	logger     *slog.Logger
 
-	bandwidthHealthMu sync.Mutex
-	bandwidthHealth   bandwidthHealthState
+	bandwidthHealthMu  sync.Mutex
+	bandwidthHealth    bandwidthHealthState
+	notificationMu     sync.Mutex
+	lastNotificationAt time.Time
 }
 
 type InterfaceDTO struct {
@@ -108,6 +110,7 @@ type DeviceDTO struct {
 	LastSeen     time.Time `json:"lastSeen"`
 	Online       bool      `json:"online"`
 	ControlState string    `json:"controlState"`
+	Whitelisted  bool      `json:"whitelisted"`
 }
 
 type ConflictDTO struct {
@@ -311,10 +314,25 @@ func (a *GUIApp) StartMonitoring(interfaceName string) (resultErr error) {
 func (a *GUIApp) StopMonitoring() error {
 	a.log(slog.LevelInfo, "monitoring stop requested", "component", "lifecycle")
 	a.mu.RLock()
+	supervisor := a.supervisor
 	cancel := a.cancel
 	a.mu.RUnlock()
 	if cancel != nil {
 		cancel()
+	}
+	if supervisor != nil {
+		select {
+		case <-supervisor.Done():
+		case <-time.After(8 * time.Second):
+		}
+		a.mu.Lock()
+		if a.supervisor == supervisor {
+			a.supervisor, a.cancel = nil, nil
+		}
+		a.mu.Unlock()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "runtime:changed")
+		}
 	}
 	return nil
 }
@@ -325,6 +343,9 @@ func (a *GUIApp) Status() StatusDTO {
 	a.mu.RUnlock()
 	if supervisor == nil {
 		status := StatusDTO{}
+		if _, config, err := loadSettings(); err == nil {
+			status.PeriodicScanEnabled = config.PeriodicDiscovery
+		}
 		if snapshot, err := loadHistorySnapshot(); err == nil {
 			status.ConflictCount = len(snapshot.Conflicts)
 			status.DeviceCount = len(snapshot.Devices)
@@ -334,6 +355,12 @@ func (a *GUIApp) Status() StatusDTO {
 	status := supervisor.Status()
 	if supervisor.Current() == nil {
 		status.Rebuilding = true
+		if _, config, err := loadSettings(); err == nil {
+			status.PeriodicScanEnabled = config.PeriodicDiscovery
+		}
+		if snapshot, err := loadHistorySnapshot(); err == nil {
+			status.DeviceCount = len(snapshot.Devices)
+		}
 	}
 	return StatusDTO{Status: status, ConflictCount: len(supervisor.ConflictHistory())}
 }
@@ -399,6 +426,7 @@ func (a *GUIApp) Devices() ([]DeviceDTO, error) {
 	a.mu.RLock()
 	supervisor := a.supervisor
 	a.mu.RUnlock()
+	_, config, configErr := loadSettings()
 	var devices []device.Device
 	if supervisor != nil && supervisor.Current() != nil {
 		devices = supervisor.Devices()
@@ -408,9 +436,8 @@ func (a *GUIApp) Devices() ([]DeviceDTO, error) {
 			return nil, err
 		}
 		devices = snapshot.Devices
-		_, config, err := loadSettings()
-		if err != nil {
-			return nil, err
+		if configErr != nil {
+			return nil, configErr
 		}
 		for index := range devices {
 			devices[index].Online = false
@@ -430,6 +457,9 @@ func (a *GUIApp) Devices() ([]DeviceDTO, error) {
 	}
 	for _, current := range devices {
 		item := deviceDTO(current)
+		if configErr == nil {
+			item.Whitelisted = config.IsWhitelisted(current.MAC)
+		}
 		if _, active := activeControl[strings.ToLower(current.MAC)]; active {
 			if continuousControl {
 				item.ControlState = "continuous"
@@ -585,7 +615,7 @@ func (a *GUIApp) SetNickname(macAddress, nickname string) error {
 		if nickname != "" {
 			snapshot.Devices[index].Name = strings.TrimSpace(nickname)
 		} else if previous != "" && snapshot.Devices[index].Name == previous {
-			snapshot.Devices[index].Name = snapshot.Devices[index].IP.String()
+			snapshot.Devices[index].Name = fallbackDeviceName(snapshot.Devices[index], snapshot.Devices[index].Type)
 		}
 		break
 	}
@@ -720,6 +750,10 @@ func (a *GUIApp) forwardEvents(ctx context.Context, supervisor *coreapp.Supervis
 			activity := activityFromEvent(event)
 			a.recordActivity(activity)
 			runtime.EventsEmit(a.ctx, "network:event", activity)
+			switch event.Kind {
+			case coreapp.EventRuntimeStarted, coreapp.EventDeviceObserved, coreapp.EventDeviceReturnedOnline:
+				go a.reconcileGlobalBandwidthAsync()
+			}
 			if !baselineComplete {
 				switch event.Kind {
 				case coreapp.EventDeviceObserved:
@@ -759,6 +793,14 @@ func (a *GUIApp) forwardEvents(ctx context.Context, supervisor *coreapp.Supervis
 }
 
 func (a *GUIApp) sendNotification(title, body string) {
+	a.notificationMu.Lock()
+	now := time.Now()
+	if !a.lastNotificationAt.IsZero() && now.Sub(a.lastNotificationAt) < 15*time.Second {
+		a.notificationMu.Unlock()
+		return
+	}
+	a.lastNotificationAt = now
+	a.notificationMu.Unlock()
 	if err := sendNativeNotification(title, body); err != nil {
 		a.log(slog.LevelWarn, "native notification failed", "component", "notification", "error", err)
 	}

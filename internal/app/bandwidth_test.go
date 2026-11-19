@@ -161,6 +161,19 @@ func TestBandwidthServiceRejectsUnavailableUnsafeAndConflictingTargets(t *testin
 	}
 }
 
+func TestBandwidthServiceAcceptsSecondaryDeviceAddress(t *testing.T) {
+	registry, target := bandwidthRegistry(t)
+	secondary := netip.MustParseAddr("2001:db8:1::20")
+	if _, _, err := registry.Observe(device.Observation{IP: secondary, MAC: target.MAC, SeenAt: time.Now().Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	controller := &recordingDeviceBandwidthController{}
+	service := NewBandwidthService(controller, registry, nil)
+	if err := service.StartMonitoring(context.Background(), ControlTarget{IP: secondary, MAC: target.MAC}); err != nil {
+		t.Fatalf("secondary address monitoring rejected: %v", err)
+	}
+}
+
 func TestBandwidthServiceKeepsPolicyWhenRemovalFails(t *testing.T) {
 	registry, target := bandwidthRegistry(t)
 	controller := &recordingBandwidthController{remErr: errors.New("restore failed")}

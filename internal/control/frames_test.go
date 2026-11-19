@@ -9,9 +9,10 @@ import (
 )
 
 func TestRestorationFrameCarriesVerifiedGatewayMapping(t *testing.T) {
+	local := endpoint(t, "192.168.1.10", "02:00:00:00:00:10")
 	gateway := endpoint(t, "192.168.1.1", "00:00:0c:00:00:01")
 	target := endpoint(t, "192.168.1.20", "02:00:00:00:00:20")
-	frame, err := restorationFrame(gateway, target)
+	frame, err := restorationFrame(local.MAC, gateway, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +25,8 @@ func TestRestorationFrameCarriesVerifiedGatewayMapping(t *testing.T) {
 		message.TargetMAC.String() != target.MAC.String() {
 		t.Fatalf("unexpected restoration message: %#v", message)
 	}
-	if source := net.HardwareAddr(frame[6:12]); source.String() != gateway.MAC.String() {
-		t.Fatalf("Ethernet source = %s, want gateway %s", source, gateway.MAC)
+	if source := net.HardwareAddr(frame[6:12]); source.String() != local.MAC.String() {
+		t.Fatalf("Ethernet source = %s, want local %s", source, local.MAC)
 	}
 }
 
@@ -37,7 +38,7 @@ func TestIsolationFrameAndRestorationFrameAreOpposites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restore, err := restorationFrame(gateway, target)
+	restore, err := restorationFrame(local.MAC, gateway, target)
 	if err != nil {
 		t.Fatal(err)
 	}

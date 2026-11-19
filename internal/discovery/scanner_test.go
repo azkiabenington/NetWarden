@@ -105,3 +105,51 @@ func TestScannerProbesBoundedUniqueIPv6Candidates(t *testing.T) {
 		t.Fatalf("unexpected scan counts: %#v", completed)
 	}
 }
+
+func TestScannerRunIgnoresOverlappingScanInProgress(t *testing.T) {
+	prober := &recordingProber{wait: make(chan struct{})}
+	scanner := NewScanner(prober, 256, 0)
+	prefix := netip.MustParsePrefix("192.168.4.0/30")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	manualDone := make(chan error, 1)
+	go func() {
+		manualDone <- scanner.Scan(ctx, prefix)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		scanner.mu.Lock()
+		running := scanner.running
+		scanner.mu.Unlock()
+		if running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("manual scan did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- scanner.Run(ctx, prefix, 5*time.Millisecond)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case err := <-runDone:
+		t.Fatalf("Scanner.Run exited prematurely during overlapping manual scan: %v", err)
+	default:
+	}
+
+	close(prober.wait)
+	if err := <-manualDone; err != nil {
+		t.Fatalf("manual scan failed: %v", err)
+	}
+	cancel()
+	if err := <-runDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+}

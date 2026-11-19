@@ -41,6 +41,7 @@ export function DeviceToolbar({
     preferences.query !== "" ||
     preferences.presence !== defaultDevicePreferences.presence ||
     preferences.role !== defaultDevicePreferences.role ||
+    preferences.whitelist !== defaultDevicePreferences.whitelist ||
     preferences.sortBy !== defaultDevicePreferences.sortBy ||
     preferences.descending
   return (
@@ -93,6 +94,15 @@ export function DeviceToolbar({
           <NativeSelectOption value="Device">Devices</NativeSelectOption>
           <NativeSelectOption value="Gateway">Gateway</NativeSelectOption>
           <NativeSelectOption value="This device">This device</NativeSelectOption>
+        </NativeSelect>
+        <NativeSelect
+          aria-label="Filter by whitelist"
+          value={preferences.whitelist}
+          onChange={(event) => update("whitelist", event.target.value)}
+        >
+          <NativeSelectOption value="all">All protection</NativeSelectOption>
+          <NativeSelectOption value="whitelisted">Whitelisted only</NativeSelectOption>
+          <NativeSelectOption value="regular">Non-whitelisted</NativeSelectOption>
         </NativeSelect>
         <NativeSelect
           aria-label="Sort devices"
