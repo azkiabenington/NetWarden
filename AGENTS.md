@@ -22,11 +22,13 @@ NetWarden is a Go/Wails desktop application for local-network discovery, device 
 - `internal/control/`: IPv4 device-control lifecycle.
 - `internal/device/`: device registry and multi-address identity.
 - `internal/discovery/`: ARP discovery plus IPv6 router/prefix tracking.
-- `internal/packet/`: validated ARP and ICMPv6 Neighbor Discovery parsing/marshalling.
+- `internal/metadata/`: IEEE OUI vendor lookup, device type classification, and interface-bound multi-protocol LAN hostname resolution (UPnP/SSDP, mDNS, NetBIOS NBSTAT, LLMNR, and reverse DNS).
+- `internal/network/gateway/`: default gateway discovery using in-process Win32 `GetBestRoute` (`iphlpapi.dll`) on Windows to avoid spawning `ROUTE.EXE` consoles.
+- `internal/packet/`: validated 802.1Q VLAN-0 unwrapping, ARP, and ICMPv6 Neighbor Discovery parsing/marshalling.
 - `internal/shaping/`: policies, token-bucket limiter, bounded forwarding queues, per-flow scheduler, and traffic counters.
 - `internal/traffic/`: live rates, peaks, and compact usage history.
 - `internal/history/`: persisted application/device/history snapshots.
-- `internal/config/`: settings storage and defaults.
+- `internal/config/`: settings storage (version 5), device nicknames, device whitelist, global traffic monitoring, and global bandwidth limit settings.
 - `internal/applog/`: bounded rotating JSONL application logs.
 - `internal/defense/` and `internal/controlaudit/`: gateway protection events and control audit history.
 

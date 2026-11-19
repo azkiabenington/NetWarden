@@ -1,130 +1,204 @@
+<div align="center">
+
+<img src="./cmd/netwarden-gui/build/appicon.png" alt="NetWarden Logo" width="110" />
+
 # NetWarden
 
-NetWarden is an open-source desktop app for seeing and managing the devices on
-your local network. It gives you a live view of what is connected, helps you
-recognize unfamiliar devices, and watches for unexpected changes to your
-network gateway.
+**Local-network device discovery, multi-protocol LAN identification, gateway-security monitoring, device whitelisting, and dual-stack bandwidth shaping for desktop.**
 
-## What you can do
+[![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Wails](https://img.shields.io/badge/Wails-v2.13-DF2935?logo=wails&logoColor=white)](https://wails.io/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-4B5563)](#production-deployment--downloads)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
 
-- Discover devices connected to your current network.
-- See IP and MAC addresses, names, vendors, and estimated device types.
-- Tell which devices are online now and review previously seen devices.
-- Give devices memorable nicknames.
-- Filter, sort, and select devices from one dashboard.
-- Temporarily disconnect selected eligible devices and restore their access.
-- Set temporary download and upload speed limits for eligible devices.
-- Monitor live per-device upload/download rates, totals, peaks, and recent history.
-- Monitor your gateway identity for suspicious changes.
-- Discover IPv6 device addresses and track the advertised router and prefixes.
-- Review recent activity, errors, and control history in Diagnostics.
-- Adjust scan timing, offline detection, history retention, and automatic
-  startup.
+</div>
 
-## Download
+---
 
-Preview builds are available from [GitHub Releases](https://github.com/amdzy/NetWarden/releases):
+## Overview
 
-- **Windows:** Download the Windows x64 ZIP, extract it, and run
-  `NetWarden.exe`. [Npcap](https://npcap.com/) must be installed.
-- **macOS:** Download the ZIP for Apple Silicon or Intel, extract it, and open
-  `NetWarden.app`.
-- **Linux:** Download the Linux x64 archive, extract it, and run `NetWarden`.
-  GTK 3, WebKit2GTK 4.1, libpcap, PolicyKit, and `pkexec` are required.
+**NetWarden** is a native desktop application built with Go, Wails v2, and React for inspecting, protecting, and managing your local network (`IPv4` and `IPv6`). Unlike passive scanners that only show raw IP/MAC addresses or require terminal utilities, NetWarden combines active multi-protocol device naming, real-time ARP/NDP gateway integrity verification, per-device and global traffic monitoring, token-bucket bandwidth shaping, and temporary device isolation into a single low-overhead desktop dashboard.
 
-Current preview builds are not signed or notarized. Windows may display an
-unknown-publisher warning. macOS may initially block the app and require you to
-approve it under **System Settings → Privacy & Security**.
+Key engineering principles:
+- **Privilege Separation**: Packet capture and narrowly validated packet transmission run inside a dedicated `capture-helper` subprocess while the GUI runs unprivileged.
+- **Zero Console Spam on Windows**: Route discovery uses in-process Win32 `iphlpapi.dll` (`GetBestRoute`) and notifications use native Win32 `Shell_NotifyIconW`, never spawning background `ROUTE.EXE`, `conhost.exe`, or `powershell.exe` windows.
+- **Wi-Fi & Npcap 1.81+/1.90 Compatibility**: Automatically unwraps IEEE 802.1Q `VLAN 0` (`0x8100`, VID 0) priority tags reconstructed by Npcap on Windows Wi-Fi adapters and uses station-compatible 802.3 source headers for ARP/NDP restoration.
+- **Safe & Reversible Controls**: Every network control (disconnect, continuous isolation, per-device limit, global bandwidth limit, or traffic monitor) is temporary and automatically restores verified ARP and IPv6 Neighbor Discovery mappings when stopped or on application shutdown.
 
-## Getting started
+---
 
-1. Open NetWarden and choose the network interface you are currently using.
-2. Start monitoring and approve the operating system's permission prompt.
-3. Wait for the first scan to populate the Devices table.
-4. Add nicknames to devices you recognize.
-5. Open a device to disconnect it or apply a bandwidth limit when needed.
-6. Review Gateway Security and Diagnostics if NetWarden reports a warning.
+## Key Features
 
-NetWarden asks for administrator permission only when packet access is needed.
-The main desktop interface continues to run as your normal user account.
+- **Multi-Protocol LAN Device Naming**: Resolves human-readable device names concurrently via **UPnP / SSDP** XML device descriptions (`<friendlyName>`, `<modelName>`), **mDNS / Bonjour** reverse PTR (`UDP 5353`), **NetBIOS Node Status (`NBSTAT`)** (`UDP 137`), **LLMNR** (`UDP 5355`), and standard **Reverse DNS**, with intelligent IEEE OUI vendor + device-type fallback labels.
+- **Stable Discovery-Order Table & Interactive Sorting**: Defaults to chronological discovery order (`FirstSeen`) so newly discovered devices append cleanly to the bottom of the list without shifting rows under your cursor, while supporting one-click column sorting across all fields.
+- **Device Whitelist Protection**: Pin trusted devices (your workstation, servers, smart TVs, or phones) to the persistent **Whitelist**. Whitelisted devices are automatically exempt from **Global Bandwidth Limits**, individual bandwidth limits, **Disconnect Selected**, and **Disconnect All**.Adding a currently limited or disconnected device to the Whitelist immediately restores its normal network access.
+- **Global Bandwidth Limit & Global Traffic Monitoring**:
+  - **Global Traffic Monitoring**: One-click toggle to monitor live upload/download speeds, totals, peaks, and historical usage across all online devices, automatically attaching to new devices as they join the LAN.
+  - **Global Bandwidth Limit**: Configure a network-wide Download and Upload speed cap (`MB/s` or `Mbps`) that applies to all online non-whitelisted devices and automatically enforces itself on newly connected non-whitelisted peers.
+- **Dual-Stack (`IPv4` + `IPv6`) Traffic Shaping & Isolation**: Token-bucket rate limiting and weighted-fair per-flow scheduling across a device's primary IPv4 address and all learned link-local/global/privacy IPv6 addresses under one MAC identity.
+- **Gateway Security & Spoofing Detection**: Passively monitors ARP announcements and IPv6 Router Advertisements (`RA`), alerting on gateway MAC conflicts, rogue routers, or unexpected prefix changes, with optional trusted gateway MAC pinning.
 
-## Device identification
+---
 
-Names, vendors, and device types are best-effort hints. Many phones, tablets,
-and computers use private or randomized MAC addresses, which can hide their
-manufacturer. These devices may appear as **Private / Randomized** or
-**Unknown** even when NetWarden is working correctly.
+## Architecture
 
-## Disconnect and restore
+```mermaid
+flowchart TB
+    subgraph GUI["Unprivileged Desktop GUI (Wails v2 + React 19)"]
+        UI["Devices / Bandwidth / Gateway Security / Diagnostics / Settings"]
+        App["GUIApp Controller & Reconciler\n(Whitelist, Global Bandwidth, Throttled Event Bus)"]
+        Runtime["Core Runtime & Supervisor\n(Registry, Metadata Resolver, Traffic Compactor, Defense Monitor)"]
+    end
 
-Disconnect controls are available only for eligible devices on your current
-local network. NetWarden validates every control request and attempts to restore
-affected devices when you restore them, stop monitoring, or close the app.
+    subgraph Metadata["Multi-Protocol LAN Name Resolver"]
+        SSDP["UPnP / SSDP XML\n(UDP 1900 + HTTP)"]
+        MDNS["mDNS Reverse PTR\n(UDP 5353)"]
+        NBNS["NetBIOS NBSTAT\n(UDP 137)"]
+        LLMNR["LLMNR Reverse PTR\n(UDP 5355)"]
+        RDNS["Standard rDNS\n(System Resolver)"]
+    end
 
-Network behavior differs between routers and devices, so treat this feature as
-a local management tool rather than a permanent access-control system.
-IPv6 disconnects block traffic routed through the verified default router;
-direct peer-to-peer link-local traffic is outside the current control path.
+    subgraph Helper["Privileged Capture & Shaping Subprocess (capture-helper)"]
+        Validator["Protocol Validator & 802.1Q VLAN-0 Normalizer"]
+        Session["Bandwidth & Isolation Session\n(ARP & IPv6 NDP Redirection / Restoration)"]
+        Forwarder["Bounded Admission Queues (4096 pkts / 6 MiB)\n+ Token-Bucket Limiter + Weighted-Fair Scheduler"]
+        Pcap["Npcap / libpcap Driver"]
+    end
 
-## Bandwidth limits
+    UI <-->|"Wails Bindings & Events"| App
+    App <--> Runtime
+    Runtime -->|"Interface-Bound Probes"| Metadata
+    Runtime <-->|"Authenticated JSON Pipe / Loopback"| Validator
+    Validator <--> Session
+    Session <--> Forwarder
+    Forwarder <--> Pcap
+```
 
-Open an eligible online device to set separate download and upload limits in
-Mbps or MB/s. Leave either direction at zero to keep it unlimited. Active
-limits appear in the Devices table and remain in effect only while NetWarden is
-monitoring the network; they are not saved or automatically reapplied after a
-restart.
+---
 
-Removing a limit restores the device's normal direct network path. IPv4,
-IPv6-only, and dual-stack devices are supported when the required local gateway
-identities are verified. Behavior may vary between routers, switches, and
-devices.
+## Prerequisites
 
-## Bandwidth monitor
+| Component | Requirement | Notes |
+| :--- | :--- | :--- |
+| **Operating System** | Windows 10/11 (x64), macOS 13+, or Linux (x64) | Native WebView2 on Windows, WebKit on macOS/Linux |
+| **Packet Capture Driver** | [Npcap 1.80+](https://npcap.com/) (Windows) or `libpcap` (macOS/Linux) | Install Npcap with default settings on Windows |
+| **Go Toolchain** *(build only)* | Go `1.25+` with CGO enabled | MinGW-w64 (`gcc`) + Npcap SDK required for Windows builds |
+| **Node.js** *(build only)* | Node.js `20+` and `npm` | Used to build the React 19 / Vite 8 frontend |
+| **Wails CLI** *(build only)* | `wails v2.13.0` | `go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0` |
 
-Start monitoring an eligible device from the Bandwidth view to route its IPv4
-and IPv6 traffic through NetWarden without applying a speed limit. The view
-derives live rates, session totals, peaks, and recent activity from aggregate
-forwarding counters. Usage is compacted into persistent minute, hour, and day
-buckets for hour/day/week/month views. Monitor-all rolls back newly installed
-routes if any device fails, monitored routes follow device address changes, and
-forwarding drops or sampling failures appear as health warnings. Monitoring
-routes remain temporary and are restored when monitoring stops or NetWarden
-shuts down. IPv6 interception uses a validated NDP redirection and restoration
-lifecycle.
+> [!IMPORTANT]
+> On Windows, ensure **[Npcap](https://npcap.com/)** is installed before starting monitoring. NetWarden automatically launches its `capture-helper` subprocess silently in the background without UAC popups when Npcap is installed with standard permissions, and falls back to UAC elevation only when Npcap is configured in `AdminOnly` mode.
 
-## Privacy and responsible use
+---
 
-NetWarden works locally and is designed to inspect your current network. Use it
-only on networks you own or are explicitly authorized to administer.
+## Quick Start
 
-## Development
+### 1. Run Prebuilt Release (Windows)
 
-Requirements include Go, Node.js, the Wails v2 CLI, and the packet-capture and
-desktop libraries for your operating system.
+1. Download the latest `NetWarden-Windows-x64.zip` (or `NetWarden.exe`) from [**GitHub Releases**](https://github.com/azkiabenington/NetWarden/releases).
+2. Ensure [Npcap](https://npcap.com/) is installed.
+3. Run `NetWarden.exe`, select your active network adapter (e.g. `Wi-Fi` or `Ethernet`), and click **Start monitoring**.
 
-```sh
-go test ./...
-go vet ./...
+### 2. Build from Source
 
+```bash
+# 1. Clone the repository
+git clone https://github.com/azkiabenington/NetWarden.git
+cd NetWarden
+
+# 2. Build and test the frontend
 cd cmd/netwarden-gui/frontend
 npm ci
-npm test
+npm test -- --run
 npm run build
-npm run lint
+cd ../../..
+
+# 3. Run backend verification
+go vet ./...
+go test ./...
+
+# 4. Build the native desktop executable with Wails
+cd cmd/netwarden-gui
+wails build -clean -trimpath -s -webview2 download
 ```
 
-Run the desktop app during development with:
+The compiled binary will be generated at `cmd/netwarden-gui/build/bin/NetWarden.exe` (Windows) or `cmd/netwarden-gui/build/bin/NetWarden` (macOS/Linux).
 
-```sh
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-make gui-dev
+---
+
+## Configuration
+
+NetWarden stores all user configuration, device history, control audit trails, and rotating JSONL logs locally in your OS application-data directory:
+
+| Platform | Configuration & Data Directory |
+| :--- | :--- |
+| **Windows** | `%APPDATA%\netwarden\` (`C:\Users\<user>\AppData\Roaming\netwarden\`) |
+| **macOS** | `~/Library/Application Support/netwarden/` |
+| **Linux** | `~/.config/netwarden/` |
+
+### `config.json` Schema (Version 5)
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `version` | `int` | `5` | Schema version (automatically migrated on startup) |
+| `interface` | `string` | `""` | Last selected Npcap/libpcap capture interface name |
+| `gateway_mac` | `string` | `""` | Optional pinned trusted gateway MAC (`00:11:22:33:44:55`) |
+| `nicknames` | `map[string]string` | `{}` | Custom user-defined nicknames keyed by lowercase MAC |
+| `whitelist` | `map[string]bool` | `{}` | Protected device MAC addresses exempt from limits and disconnects |
+| `scan_interval_seconds` | `int` | `10` | Interval between periodic active ARP/IPv6 discovery scans (`5–3600`) |
+| `offline_after_seconds` | `int` | `60` | Grace period before an unobserved device is marked offline (`30–86400`) |
+| `history_retention_days` | `int` | `90` | Retention window for persisted device and traffic history (`1–3650`) |
+| `auto_start` | `bool` | `false` | Automatically start monitoring the selected interface on launch |
+| `periodic_discovery` | `bool` | `true` | Run background periodic discovery scans while monitoring |
+| `notifications_enabled` | `bool` | `false` | Master switch for OS tray notifications (disabled by default to prevent spam) |
+| `global_traffic_monitoring` | `bool` | `false` | Automatically monitor live traffic for all online peer devices |
+| `global_bandwidth_limit_enabled` | `bool` | `false` | Automatically enforce global download/upload limits on non-whitelisted peers |
+| `global_download_bits_per_second` | `uint64` | `0` | Global download rate limit in bits/sec (`0` = unlimited) |
+| `global_upload_bits_per_second` | `uint64` | `0` | Global upload rate limit in bits/sec (`0` = unlimited) |
+
+---
+
+## Usage & Operational Guide
+
+### Global Traffic, Bandwidth Limit & Whitelist Panel
+
+Located at the top of both the **Devices** and **Bandwidth** tabs:
+1. **Global Traffic Monitoring**: Toggle **ON** to automatically route and measure live upload/download throughput for all online peer devices. Any new device discovered on the network is automatically added to live monitoring.
+2. **Global Bandwidth Limit**: Enter a Download and/or Upload rate (in `MB/s` or `Mbps`, configurable under **Settings → Application**) and click **Enable global limit**. All online non-whitelisted devices are immediately shaped to that rate.
+3. **Device Whitelist**:
+   - Click the **Shield icon** on any row in the Devices table, inside the Device Detail drawer, or select a device from the **Device Whitelist** dropdown in the Global panel to protect it.
+   - Whitelisted devices cannot be disconnected or rate-limited, and whitelisting an active target immediately removes any active limit or isolation.
+
+> [!TIP]
+> You can filter the Devices table by **All protection**, **Whitelisted only**, or **Non-whitelisted** using the toolbar filter dropdown, and click any column header to sort while keeping discovery order (`Sort by discovery order`) as the default.
+
+---
+
+## Core Mechanisms
+
+### 1. Userspace Forwarding & Weighted-Fair Scheduler
+When traffic monitoring or a bandwidth limit is active for a device, `capture-helper` redirects IPv4 traffic via ARP replies and IPv6 traffic via validated Neighbor Advertisements (`NA`) between the target device and the verified default router:
+
+```text
+Capture / Classification
+   └── Bounded Upload & Download Admission Queues (4096 packets / 6 MiB each)
+          └── Per-Device / Per-Direction Flow Queues
+                 └── Token-Bucket Eligibility & Weighted-Fair Scheduler
+                        └── Single Serialized Packet Transmitter
 ```
 
-Use `make gui-build` to create a local packaged build. Version tags such as
-`v2.0.1` trigger the GitHub Actions workflow, which builds unsigned preview
-archives and prepares a draft GitHub Release.
+- Unrestricted monitored flows receive an 8-packet priority burst followed by round-robin service of eligible rate-limited flows so limited flows never starve.
+- On 802.11 station-mode Wi-Fi interfaces (Windows Npcap), corrective ARP and NDP restoration packets use the local adapter's MAC as the outer 802.3 Ethernet source address while carrying the verified gateway/device hardware address inside the ARP `SenderMAC` / ICMPv6 `Target Link-Layer Address` payload, preventing NDIS miniport driver rejection (`ERROR_GEN_FAILURE / 31`).
 
-## License
+### 2. Interface-Bound Multi-Protocol Name Resolution
+On Windows systems with Hyper-V, WSL2, or Docker virtual switches, unbound multicast UDP sockets often egress the wrong virtual adapter. NetWarden's resolver (`internal/metadata/local_lookup.go`) determines the local IPv4 source address that routes to each target host (`localSourceIPv4For`) and binds all mDNS (`224.0.0.251:5353`), LLMNR (`224.0.0.252:5355`), SSDP (`239.255.255.250:1900`), and NetBIOS (`UDP 137`) sockets directly to the physical LAN interface.
 
-NetWarden is free software licensed under the [GNU General Public License
-version 3 or later](LICENSE) (`GPL-3.0-or-later`).
+---
+
+## Production Deployment & Downloads
+
+Prebuilt binaries are published on [**GitHub Releases**](https://github.com/azkiabenington/NetWarden/releases):
+
+- **`NetWarden.exe`**: Standalone Windows x64 portable executable (also committed in the repository root for convenience).
+- **`NetWarden-Windows-x64.zip`**: Packaged Windows x64 release archive.

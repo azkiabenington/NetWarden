@@ -7,6 +7,6 @@ const (
 // Release builds override these values with -ldflags. The defaults keep local
 // development builds useful without requiring a generated source file.
 var (
-	applicationVersion = "2.0.0"
-	buildVersion       = "development"
+	applicationVersion = "2.3.0"
+	buildVersion       = "v2.3.0"
 )
