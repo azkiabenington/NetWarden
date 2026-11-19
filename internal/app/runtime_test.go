@@ -341,3 +341,37 @@ func TestSupervisorRebuildsRuntimeAfterRouteChange(t *testing.T) {
 		t.Fatal("supervisor completion signal was not closed")
 	}
 }
+
+func TestBootstrapTimesOutGatewayResolutionAndClosesDriver(t *testing.T) {
+	localMAC, _ := net.ParseMAC("02:00:00:00:00:10")
+	driver := &runtimeDriver{}
+	_, err := Bootstrap(context.Background(), Dependencies{
+		Gateway: fixedGateway{route: networkgateway.Route{
+			GatewayIP: netip.MustParseAddr("192.168.1.1"), InterfaceIP: netip.MustParseAddr("192.168.1.2"),
+		}},
+		Open: func(string) (capture.Driver, error) { return driver, nil },
+		Resolve: func(ctx context.Context, _ capture.Driver, _ net.HardwareAddr, _, _ netip.Addr) (net.HardwareAddr, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}, Config{
+		Interface: pcapdriver.Interface{
+			Name: "pcap0", SystemName: "en0", MAC: localMAC,
+			Prefixes: []netip.Prefix{netip.MustParsePrefix("192.168.1.2/24")},
+		},
+		GatewayResolveTimeout: 25 * time.Millisecond,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v, want context.DeadlineExceeded", err)
+	}
+	var runtimeErr *Error
+	if !errors.As(err, &runtimeErr) || runtimeErr.Stage != StageGatewayIdentity {
+		t.Fatalf("unexpected error stage: %#v", err)
+	}
+	driver.mu.Lock()
+	closed := driver.closed
+	driver.mu.Unlock()
+	if !closed {
+		t.Fatal("driver was not closed after gateway resolution timeout")
+	}
+}

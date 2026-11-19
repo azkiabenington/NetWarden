@@ -50,18 +50,19 @@ type Dependencies struct {
 }
 
 type Config struct {
-	Interface            pcapdriver.Interface
-	ScanInterval         time.Duration
-	ProbeDelay           time.Duration
-	MaximumHosts         int
-	OfflineAfter         time.Duration
-	LivenessCheck        time.Duration
-	ConflictCooldown     time.Duration
-	NetworkCheck         time.Duration
-	DeviceRetention      time.Duration
-	PinnedGatewayMAC     net.HardwareAddr
-	HistoryRetention     time.Duration
-	IPv6AddressRetention time.Duration
+	Interface             pcapdriver.Interface
+	ScanInterval          time.Duration
+	ProbeDelay            time.Duration
+	MaximumHosts          int
+	OfflineAfter          time.Duration
+	LivenessCheck         time.Duration
+	ConflictCooldown      time.Duration
+	NetworkCheck          time.Duration
+	DeviceRetention       time.Duration
+	PinnedGatewayMAC      net.HardwareAddr
+	HistoryRetention      time.Duration
+	IPv6AddressRetention  time.Duration
+	GatewayResolveTimeout time.Duration
 }
 
 type Status struct {
@@ -153,7 +154,9 @@ func Bootstrap(ctx context.Context, dependencies Dependencies, config Config) (*
 	if err != nil {
 		return nil, stageError(StageCaptureOpen, err)
 	}
-	gatewayMAC, err := dependencies.Resolve(ctx, driver, config.Interface.MAC, route.InterfaceIP, route.GatewayIP)
+	resolveCtx, cancelResolve := context.WithTimeout(ctx, config.GatewayResolveTimeout)
+	gatewayMAC, err := dependencies.Resolve(resolveCtx, driver, config.Interface.MAC, route.InterfaceIP, route.GatewayIP)
+	cancelResolve()
 	if err != nil {
 		driver.Close()
 		return nil, stageError(StageGatewayIdentity, fmt.Errorf("resolve default gateway identity: %w", err))
@@ -795,6 +798,9 @@ func applyRuntimeDefaults(config *Config) {
 	}
 	if config.IPv6AddressRetention <= 0 {
 		config.IPv6AddressRetention = 24 * time.Hour
+	}
+	if config.GatewayResolveTimeout <= 0 {
+		config.GatewayResolveTimeout = 10 * time.Second
 	}
 }
 

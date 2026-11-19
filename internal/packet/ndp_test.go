@@ -177,3 +177,21 @@ func icmpv6TestFrame(source, destination netip.Addr, mac net.HardwareAddr, icmp 
 	binary.BigEndian.PutUint16(payload[2:4], ^uint16(sum))
 	return frame
 }
+
+func TestParseNDPAcceptsPriorityTaggedFrameAndRejectsNonZeroVLAN(t *testing.T) {
+	source := netip.MustParseAddr("fe80::20c:29ff:fe12:3456")
+	destination := netip.MustParseAddr("ff02::1")
+	mac, _ := net.ParseMAC("02:0c:29:12:34:56")
+	untagged := ndpTestFrame(t, ICMPv6NeighborAdvertisement, source, destination, source, mac)
+
+	message, err := ParseNDP(insertVLAN8021Q(untagged, 0x0000))
+	if err != nil {
+		t.Fatalf("priority-tagged NDP rejected: %v", err)
+	}
+	if message.Type != ICMPv6NeighborAdvertisement || message.SourceIP != source || message.SourceMAC.String() != mac.String() {
+		t.Fatalf("unexpected priority-tagged NDP message: %#v", message)
+	}
+	if _, err := ParseNDP(insertVLAN8021Q(untagged, 0x0064)); err == nil {
+		t.Fatal("accepted NDP frame with non-zero VLAN ID")
+	}
+}

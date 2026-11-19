@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amdzy/NetWarden/internal/capture"
+	"github.com/amdzy/NetWarden/internal/packet"
 	"github.com/gopacket/gopacket/pcap"
 )
 
@@ -91,6 +92,7 @@ func (d *Driver) run(ctx context.Context, consume func(capture.Frame) error, cop
 	if consume == nil {
 		return errors.New("frame consumer is required")
 	}
+	var scratch []byte
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -105,14 +107,26 @@ func (d *Driver) run(ctx context.Context, consume func(capture.Frame) error, cop
 			}
 			return fmt.Errorf("read packet: %w", err)
 		}
-		if copyFrame {
-			data = append([]byte(nil), data...)
-		}
+		data, scratch = normalizeCapturedFrame(scratch, data, copyFrame)
 		frame := capture.Frame{Data: data, CapturedAt: info.Timestamp}
 		if err := consume(frame); err != nil {
 			return err
 		}
 	}
+}
+
+func normalizeCapturedFrame(scratch, data []byte, copyFrame bool) ([]byte, []byte) {
+	if packet.IsPriorityTagged(data) {
+		if copyFrame {
+			return packet.StripPriorityTag(nil, data), scratch
+		}
+		untagged := packet.StripPriorityTag(scratch[:0], data)
+		return untagged, untagged
+	}
+	if copyFrame {
+		return append([]byte(nil), data...), scratch
+	}
+	return data, scratch
 }
 
 func (d *Driver) Send(ctx context.Context, frame []byte) error {

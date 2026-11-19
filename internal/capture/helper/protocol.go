@@ -64,7 +64,12 @@ func Serve(ctx context.Context, driver capture.Driver, localMAC net.HardwareAddr
 	runResult := make(chan error, 1)
 	var gatewayMu sync.RWMutex
 	var gatewayMAC net.HardwareAddr
+	var inboundScratch []byte
 	consume := func(frame capture.Frame) error {
+		if packet.IsPriorityTagged(frame.Data) {
+			inboundScratch = packet.StripPriorityTag(inboundScratch[:0], frame.Data)
+			frame.Data = inboundScratch
+		}
 		var ndpValid bool
 		etherType := frameEtherType(frame.Data)
 		switch etherType {
@@ -250,8 +255,11 @@ func ValidateIPv6DiscoveryFrame(frame []byte, localMAC net.HardwareAddr, prefixe
 }
 
 func ValidateControlFrame(frame []byte, localMAC, gatewayMAC net.HardwareAddr, localIP, gatewayIP netip.Addr, prefix netip.Prefix) error {
+	if len(frame) < packet.EthernetHeaderLen || binary.BigEndian.Uint16(frame[12:14]) != packet.EtherTypeARP {
+		return errors.New("helper accepts only Ethernet/IPv4 ARP frames")
+	}
 	message, err := packet.ParseARP(frame)
-	if err != nil || len(frame) < packet.EthernetHeaderLen {
+	if err != nil {
 		return errors.New("helper accepts only Ethernet/IPv4 ARP frames")
 	}
 	if message.Operation != packet.ARPOpReply || message.SenderIP != gatewayIP {
@@ -280,6 +288,9 @@ func normalizeRunError(err error) error {
 }
 
 func ValidateDiscoveryFrame(frame []byte, localMAC net.HardwareAddr, localIP netip.Addr, prefix netip.Prefix) error {
+	if len(frame) < packet.EthernetHeaderLen || binary.BigEndian.Uint16(frame[12:14]) != packet.EtherTypeARP {
+		return errors.New("helper accepts only Ethernet/IPv4 ARP frames")
+	}
 	message, err := packet.ParseARP(frame)
 	if err != nil {
 		return errors.New("helper accepts only Ethernet/IPv4 ARP frames")

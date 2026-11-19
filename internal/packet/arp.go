@@ -65,13 +65,10 @@ func MarshalARP(destination, source net.HardwareAddr, message ARP) ([]byte, erro
 // ParseARP parses a complete Ethernet frame containing an Ethernet/IPv4 ARP
 // message. Copies are returned so callers can safely reuse capture buffers.
 func ParseARP(frame []byte) (ARP, error) {
-	if len(frame) < EthernetHeaderLen+ARPHeaderLen {
+	etherType, arp, ok := ParseEthernetHeader(frame)
+	if !ok || etherType != EtherTypeARP || len(arp) < ARPHeaderLen {
 		return ARP{}, ErrMalformedARP
 	}
-	if binary.BigEndian.Uint16(frame[12:14]) != EtherTypeARP {
-		return ARP{}, ErrMalformedARP
-	}
-	arp := frame[EthernetHeaderLen:]
 	if binary.BigEndian.Uint16(arp[0:2]) != arpHardwareEther ||
 		binary.BigEndian.Uint16(arp[2:4]) != arpProtocolIPv4 ||
 		arp[4] != 6 || arp[5] != 4 {

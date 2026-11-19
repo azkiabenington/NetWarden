@@ -148,11 +148,10 @@ type PrefixInformation struct {
 // belongs in a reusable IPv6 extension-chain parser, not in NDP-specific code.
 func ParseNDP(frame []byte) (NDP, error) {
 	const ipv6HeaderLength = 40
-	if len(frame) < EthernetHeaderLen+ipv6HeaderLength+8 ||
-		binary.BigEndian.Uint16(frame[12:14]) != EtherTypeIPv6 {
+	etherType, ipv6, ok := ParseEthernetHeader(frame)
+	if !ok || etherType != EtherTypeIPv6 || len(ipv6) < ipv6HeaderLength+8 {
 		return NDP{}, ErrMalformedNDP
 	}
-	ipv6 := frame[EthernetHeaderLen:]
 	if ipv6[0]>>4 != 6 || ipv6[6] != NextHeaderICMPv6 || ipv6[7] != NDPHopLimit {
 		return NDP{}, ErrMalformedNDP
 	}

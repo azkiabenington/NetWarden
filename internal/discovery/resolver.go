@@ -6,23 +6,48 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"time"
 
 	"github.com/amdzy/NetWarden/internal/capture"
 	"github.com/amdzy/NetWarden/internal/packet"
 )
 
-var errAddressResolved = errors.New("ARP address resolved")
+var (
+	errAddressResolved      = errors.New("ARP address resolved")
+	arpResolveRetryInterval = time.Second
+)
 
 // ResolveARP asks targetIP for its MAC address and waits for the corresponding
-// ARP reply. The caller controls the timeout through ctx.
+// ARP reply, periodically re-probing while waiting. The caller controls the
+// timeout through ctx.
 func ResolveARP(ctx context.Context, driver capture.Driver, localMAC net.HardwareAddr, localIP, targetIP netip.Addr) (net.HardwareAddr, error) {
 	prober := NewARPProber(driver, localMAC, localIP)
 	if err := prober.Probe(ctx, targetIP); err != nil {
 		return nil, fmt.Errorf("send ARP resolution request: %w", err)
 	}
 
+	runCtx, cancelRun := context.WithCancel(ctx)
+	retryDone := make(chan struct{})
+	go func() {
+		defer close(retryDone)
+		interval := arpResolveRetryInterval
+		if interval <= 0 {
+			return
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				_ = prober.Probe(runCtx, targetIP)
+			}
+		}
+	}()
+
 	var resolved net.HardwareAddr
-	err := driver.Run(ctx, func(frame capture.Frame) error {
+	err := driver.Run(runCtx, func(frame capture.Frame) error {
 		message, err := packet.ParseARP(frame.Data)
 		if err != nil || message.Operation != packet.ARPOpReply ||
 			message.SenderIP != targetIP || message.TargetIP != localIP ||
@@ -32,6 +57,8 @@ func ResolveARP(ctx context.Context, driver capture.Driver, localMAC net.Hardwar
 		resolved = append(net.HardwareAddr(nil), message.SenderMAC...)
 		return errAddressResolved
 	})
+	cancelRun()
+	<-retryDone
 	if errors.Is(err, errAddressResolved) {
 		return resolved, nil
 	}
